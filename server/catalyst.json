@@ -1,0 +1,9 @@
+{
+  "functions": {
+    "targets": [
+      "call_logs_app_backend_function"
+    ],
+    "ignore": [],
+    "source": "functions"
+  }
+}

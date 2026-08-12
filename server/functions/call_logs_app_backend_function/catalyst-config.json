@@ -1,0 +1,22 @@
+{
+	"deployment": {
+		"name": "call_logs_app_backend_function",
+		"stack": "node24",
+		"type": "advancedio",
+		"env_variables": {
+			"ZOHO_DC": "in",
+			"ZOHO_CLIENT_ID": "1000.8S1Y38QSWQXGNGQ9DE6Y733YO7QHRQ",
+			"ZOHO_CLIENT_SECRET": "dda1b78a7750d8d528208bb068d2788bfc64eb8d03",
+			"ZOHO_REFRESH_TOKEN": "1000.75a3a6a3d2dbf7435d6ed1f02289df09.3ec90072ff986e0f4152fd4bca8adb65",
+			"ZOHO_CRM_CALL_LOGS_MODULE": "Mobile_Call_Records",
+			"ZOHO_CRM_CALL_RECORDINGS_MODULE": "Mobile_Call_Recordings",
+			"MOBILE_API_KEY": "K8vP4xN7qL2mR9tY6wC3sF5hJ1dZ0aB8",
+			"ZOHO_CRM_API_VERSION": "v8",
+			"CRM_BATCH_SIZE": "100",
+			"MAX_UPLOAD_SIZE_BYTES": "26214400"
+		}
+	},
+	"execution": {
+		"main": "index.js"
+	}
+}

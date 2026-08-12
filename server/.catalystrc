@@ -1,0 +1,30 @@
+{
+  "defaults": {
+    "project": 1,
+    "env": 1
+  },
+  "actives": {
+    "project": 1,
+    "env": 1
+  },
+  "projects": [
+    {
+      "idx": 1,
+      "id": "56954000000038001",
+      "name": "CallLogsAppBackend",
+      "domain": {
+        "id": "50044840245",
+        "name": "calllogsappbackend-60079340748.development"
+      },
+      "timezone": "Asia/Kolkata",
+      "env": [
+        {
+          "idx": 1,
+          "id": "60079340748",
+          "name": "Development",
+          "type": 3
+        }
+      ]
+    }
+  ]
+}
