@@ -1,94 +1,60 @@
 /**
  * CallRecordingsScreen.tsx
  *
- * Responsibilities:
- * - Read the saved local user identity
- * - Scan local recording folders
- * - Display discovered recordings
+ * Recording sync:
  *
- * Identity is NOT edited from this screen.
- *
- * Recording upload/sync can later be added as a
- * separate flow that matches a recording to a call
- * and attaches it to the existing CRM call record.
+ * recording
+ * -> matching Android call
+ * -> Unique_Call_ID
+ * -> existing CRM call
+ * -> attachment
  */
 
-import React, {
-  useCallback,
-} from 'react';
+import React, { useCallback } from 'react';
 
-import {
-  FlatList,
-  RefreshControl,
-  StyleSheet,
-  View,
-} from 'react-native';
+import { FlatList, RefreshControl, StyleSheet, View } from 'react-native';
 
-import {
-  useFocusEffect,
-} from '@react-navigation/native';
+import { useFocusEffect } from '@react-navigation/native';
 
-import type {
-  NativeStackScreenProps,
-} from '@react-navigation/native-stack';
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
-import type {
-  RootStackParamList,
-} from '../navigation/AppNavigator';
+import type { RootStackParamList } from '../navigation/AppNavigator';
 
-import {useCallRecordings} from '../hooks/useCallRecordings';
-import {useLocalIdentity} from '../hooks/useLocalIdentity';
+import { useCallRecordings } from '../hooks/useCallRecordings';
+
+import { useLocalIdentity } from '../hooks/useLocalIdentity';
+
+import { useRecordingSync } from '../hooks/useRecordingSync';
 
 import RecordingItem from '../components/RecordingItem';
+
 import LoadingIndicator from '../components/LoadingIndicator';
+
 import EmptyState from '../components/EmptyState';
 
-import {COLORS} from '../utils/constants';
+import UploadFab from '../components/UploadFab';
 
-import {
-  CallRecordingFile,
-} from '../types/Recording.types';
+import SyncDateRangeModal from '../components/SyncDateRangeModal';
 
-import {
-  PermissionManager,
-} from '../permissions/PermissionManager';
+import SafeScreen from '../components/SafeScreen';
 
-type Props = NativeStackScreenProps<
-  RootStackParamList,
-  'CallRecordings'
->;
+import { COLORS } from '../utils/constants';
 
-export default function CallRecordingsScreen({
-  navigation,
-}: Props) {
-  /**
-   * Identity is read-only here.
-   *
-   * No modal is shown from the recording screen.
-   */
-  const {
-    identity,
-    loadingIdentity,
-    reloadIdentity,
-  } = useLocalIdentity();
+import { CallRecordingFile } from '../types/Recording.types';
 
-  /**
-   * Reload the identity whenever this
-   * screen receives focus.
-   *
-   * This guarantees that edits made on Home
-   * are immediately available here.
-   */
+import { PermissionManager } from '../permissions/PermissionManager';
+
+type Props = NativeStackScreenProps<RootStackParamList, 'CallRecordings'>;
+
+export default function CallRecordingsScreen({ navigation }: Props) {
+  const { identity, loadingIdentity, reloadIdentity } = useLocalIdentity();
+
   useFocusEffect(
     useCallback(() => {
       reloadIdentity();
     }, [reloadIdentity]),
   );
 
-  /**
-   * Recording scanning starts only after
-   * the user identity exists.
-   */
   const {
     recordings,
     loading,
@@ -96,43 +62,30 @@ export default function CallRecordingsScreen({
     permissionDenied,
     permanentlyDenied,
     refresh,
-  } = useCallRecordings(
-    Boolean(identity),
-  );
+  } = useCallRecordings(Boolean(identity));
+
+  const sync = useRecordingSync({
+    recordings,
+    identity,
+  });
+
+  let content: React.ReactNode;
 
   if (loadingIdentity) {
-    return (
-      <LoadingIndicator message="Loading user details..." />
-    );
-  }
-
-  /**
-   * Safety guard in case somebody reaches
-   * this route without completing setup.
-   */
-  if (!identity) {
-    return (
+    content = <LoadingIndicator message="Loading user details..." />;
+  } else if (!identity) {
+    content = (
       <EmptyState
         title="User details required"
-        description={
-          'Your user name and phone number are not configured. Please configure them from the Home screen first.'
-        }
+        description="Your user name and phone number are not configured. Please configure them from the Home screen first."
         actionLabel="Go to Home"
-        onAction={() =>
-          navigation.navigate('Home')
-        }
+        onAction={() => navigation.navigate('Home')}
       />
     );
-  }
-
-  if (loading) {
-    return (
-      <LoadingIndicator message="Scanning for call recordings..." />
-    );
-  }
-
-  if (permissionDenied) {
-    return (
+  } else if (loading) {
+    content = <LoadingIndicator message="Scanning for call recordings..." />;
+  } else if (permissionDenied) {
+    content = (
       <EmptyState
         title="Permission required"
         description={
@@ -140,15 +93,10 @@ export default function CallRecordingsScreen({
             ? 'This app needs storage access to read call recording folders. Enable the required storage access in Settings, then return and rescan.'
             : 'Storage access is needed to find call recording files.'
         }
-        actionLabel={
-          permanentlyDenied
-            ? 'Open Settings'
-            : 'Grant Permission'
-        }
+        actionLabel={permanentlyDenied ? 'Open Settings' : 'Grant Permission'}
         onAction={async () => {
           if (permanentlyDenied) {
-            await PermissionManager
-              .openManageStorageSettings();
+            await PermissionManager.openManageStorageSettings();
 
             return;
           }
@@ -157,10 +105,8 @@ export default function CallRecordingsScreen({
         }}
       />
     );
-  }
-
-  if (error) {
-    return (
+  } else if (error) {
+    content = (
       <EmptyState
         title="Something went wrong"
         description={error}
@@ -168,10 +114,8 @@ export default function CallRecordingsScreen({
         onAction={refresh}
       />
     );
-  }
-
-  if (recordings.length === 0) {
-    return (
+  } else if (recordings.length === 0) {
+    content = (
       <EmptyState
         title="No recordings found"
         description="No audio files were found in known recording folders on this device."
@@ -179,42 +123,68 @@ export default function CallRecordingsScreen({
         onAction={refresh}
       />
     );
+  } else {
+    content = (
+      <View style={styles.content}>
+        <FlatList
+          data={recordings}
+          keyExtractor={(item: CallRecordingFile) => item.id}
+          renderItem={({ item }) => <RecordingItem recording={item} />}
+          contentContainerStyle={styles.listContent}
+          refreshControl={
+            <RefreshControl
+              refreshing={false}
+              onRefresh={refresh}
+              colors={[COLORS.primary]}
+            />
+          }
+          initialNumToRender={20}
+          windowSize={10}
+        />
+
+        <UploadFab
+          onPress={sync.openModal}
+          disabled={sync.uploading}
+
+          accessibilityLabel="Upload matched call recordings to CRM"
+        />
+
+        <SyncDateRangeModal
+          visible={sync.modalVisible}
+          uploading={sync.uploading}
+          progress={sync.progress}
+          onClose={sync.closeModal}
+          onConfirm={sync.syncRange}
+          title="Sync recordings to CRM"
+          subtitle="Select the call date range. Recordings are matched to calls in this range and attached only to existing CRM call records."
+          confirmLabel="Sync recordings"
+          progressLabel="recordings"
+        />
+      </View>
+    );
   }
 
-  return (
-    <View style={styles.container}>
-      <FlatList
-        data={recordings}
-        keyExtractor={(
-          item: CallRecordingFile,
-        ) => item.id}
-        renderItem={({item}) => (
-          <RecordingItem recording={item} />
-        )}
-        contentContainerStyle={
-          styles.listContent
-        }
-        refreshControl={
-          <RefreshControl
-            refreshing={false}
-            onRefresh={refresh}
-            colors={[COLORS.primary]}
-          />
-        }
-        initialNumToRender={20}
-        windowSize={10}
-      />
-    </View>
-  );
+  return <SafeScreen style={styles.container}>{content}</SafeScreen>;
 }
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
     backgroundColor: COLORS.background,
   },
 
+  content: {
+    flex: 1,
+  },
+
   listContent: {
-    paddingVertical: 10,
+    paddingTop: 10,
+
+    /**
+     * Keeps final recording above
+     * floating upload button.
+     */
+    paddingBottom: 110,
+
+    flexGrow: 1,
   },
 });

@@ -1,13 +1,7 @@
-/**
- * useCallRecordings.ts
- * CHANGE: exposes `permanentlyDenied` (storage/all-files-access can only
- * be granted via Settings, so the screen needs to know to send the user
- * there instead of retrying a popup that will never appear).
- */
-import { useCallback, useEffect, useState } from 'react';
-import { CallRecordingFile } from '../types/Recording.types';
-import { RecordingService } from '../services/RecordingService';
-import { PermissionManager } from '../permissions/PermissionManager';
+import {useCallback, useEffect, useState} from 'react';
+import {CallRecordingFile} from '../types/Recording.types';
+import {RecordingService} from '../services/RecordingService';
+import {PermissionManager} from '../permissions/PermissionManager';
 
 interface UseCallRecordingsResult {
   recordings: CallRecordingFile[];
@@ -18,40 +12,50 @@ interface UseCallRecordingsResult {
   refresh: () => Promise<void>;
 }
 
+/**
+ * Scan local recordings only when enabled.
+ * Home identity setup controls whether feature screens are allowed to proceed.
+ */
 export function useCallRecordings(
-  enabled: boolean,
+  enabled = true,
 ): UseCallRecordingsResult {
   const [recordings, setRecordings] = useState<CallRecordingFile[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [loading, setLoading] = useState<boolean>(enabled);
   const [error, setError] = useState<string | null>(null);
   const [permissionDenied, setPermissionDenied] = useState<boolean>(false);
   const [permanentlyDenied, setPermanentlyDenied] = useState<boolean>(false);
 
   const load = useCallback(async () => {
     if (!enabled) {
-  setRecordings([]);
-  setLoading(false);
-  return;
-}
-    setLoading(true);
-    setError(null);
-
-    const permissionResult = await PermissionManager.requestStoragePermissions();
-    console.log('[useCallRecordings] permission result:', permissionResult);
-
-    if (!permissionResult.granted) {
-      setPermissionDenied(true);
-      setPermanentlyDenied(permissionResult.permanentlyDenied);
+      setRecordings([]);
       setLoading(false);
+      setError(null);
+      setPermissionDenied(false);
+      setPermanentlyDenied(false);
       return;
     }
 
-    setPermissionDenied(false);
-    setPermanentlyDenied(false);
+    setLoading(true);
+    setError(null);
+
     try {
+      const permissionResult = await PermissionManager.requestStoragePermissions();
+      console.log('[useCallRecordings] permission result:', permissionResult);
+
+      if (!permissionResult.granted) {
+        setPermissionDenied(true);
+        setPermanentlyDenied(permissionResult.permanentlyDenied);
+        setRecordings([]);
+        return;
+      }
+
+      setPermissionDenied(false);
+      setPermanentlyDenied(false);
+
       const files = await RecordingService.scanCallRecordings();
       setRecordings(files);
     } catch (err) {
+      console.warn('[useCallRecordings] Failed to scan recordings:', err);
       setError('Failed to scan for call recordings. Please try again.');
     } finally {
       setLoading(false);
@@ -62,5 +66,12 @@ export function useCallRecordings(
     load();
   }, [load]);
 
-  return { recordings, loading, error, permissionDenied, permanentlyDenied, refresh: load };
+  return {
+    recordings,
+    loading,
+    error,
+    permissionDenied,
+    permanentlyDenied,
+    refresh: load,
+  };
 }

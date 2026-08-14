@@ -15,6 +15,7 @@ export interface SyncFailedItem {
   reason: string;
 }
 
+/** Call-log metadata sync result. */
 export interface SyncSummary {
   totalReceived: number;
   uploaded: number;
@@ -24,6 +25,20 @@ export interface SyncSummary {
   attachmentFailed: number;
   uploadedIds: string[];
   duplicateIds: string[];
+  failedItems: SyncFailedItem[];
+  errors: string[];
+}
+
+/** Recording-only sync result. No CRM call record is created by this flow. */
+export interface RecordingSyncSummary {
+  totalReceived: number;
+  attached: number;
+  alreadyAttached: number;
+  notFound: number;
+  failed: number;
+  attachedIds: string[];
+  alreadyAttachedIds: string[];
+  notFoundIds: string[];
   failedItems: SyncFailedItem[];
   errors: string[];
 }

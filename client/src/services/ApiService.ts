@@ -1,13 +1,17 @@
-import { CallLogEntry } from '../types/CallLog.types';
-import { CallRecordingFile } from '../types/Recording.types';
-import { DateRange, SyncProgress, SyncSummary } from '../types/Sync.types';
+import {CallLogEntry} from '../types/CallLog.types';
+import {CallRecordingFile} from '../types/Recording.types';
+import {
+  DateRange,
+  RecordingSyncSummary,
+  SyncProgress,
+  SyncSummary,
+} from '../types/Sync.types';
 import {
   API_BASE_URL,
   API_KEY,
   SYNC_CHUNK_SIZE,
   UPLOAD_TIMEOUT_MS,
 } from '../config/apiConfig';
-import { RecordingMatcher } from './RecordingMatcher';
 
 const MIME_TYPES: Record<string, string> = {
   mp3: 'audio/mpeg',
@@ -41,14 +45,18 @@ async function fetchWithTimeout(
 ): Promise<Response> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
   try {
-    return await fetch(url, { ...options, signal: controller.signal });
+    return await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
   } finally {
     clearTimeout(timeoutId);
   }
 }
 
-function emptySummary(): SyncSummary {
+function emptyCallSummary(): SyncSummary {
   return {
     totalReceived: 0,
     uploaded: 0,
@@ -63,7 +71,7 @@ function emptySummary(): SyncSummary {
   };
 }
 
-function mergeSummary(target: SyncSummary, incoming: SyncSummary): void {
+function mergeCallSummary(target: SyncSummary, incoming: SyncSummary): void {
   target.totalReceived += incoming.totalReceived;
   target.uploaded += incoming.uploaded;
   target.skippedDuplicates += incoming.skippedDuplicates;
@@ -76,41 +84,166 @@ function mergeSummary(target: SyncSummary, incoming: SyncSummary): void {
   target.errors.push(...(incoming.errors || []));
 }
 
-interface PreparedCall {
+function emptyRecordingSummary(): RecordingSyncSummary {
+  return {
+    totalReceived: 0,
+    attached: 0,
+    alreadyAttached: 0,
+    notFound: 0,
+    failed: 0,
+    attachedIds: [],
+    alreadyAttachedIds: [],
+    notFoundIds: [],
+    failedItems: [],
+    errors: [],
+  };
+}
+
+function mergeRecordingSummary(
+  target: RecordingSyncSummary,
+  incoming: RecordingSyncSummary,
+): void {
+  target.totalReceived += incoming.totalReceived;
+  target.attached += incoming.attached;
+  target.alreadyAttached += incoming.alreadyAttached;
+  target.notFound += incoming.notFound;
+  target.failed += incoming.failed;
+  target.attachedIds.push(...(incoming.attachedIds || []));
+  target.alreadyAttachedIds.push(...(incoming.alreadyAttachedIds || []));
+  target.notFoundIds.push(...(incoming.notFoundIds || []));
+  target.failedItems.push(...(incoming.failedItems || []));
+  target.errors.push(...(incoming.errors || []));
+}
+
+export interface RecordingUploadItem {
   call: CallLogEntry;
-  recording: CallRecordingFile | null;
+  recording: CallRecordingFile;
 }
 
 class ApiServiceClass {
+  /**
+   * Call Logs screen flow.
+   *
+   * This endpoint sends METADATA ONLY. Audio is intentionally not included.
+   * Recordings are attached later from the Call Recordings screen.
+   */
   async syncCalls(
     calls: CallLogEntry[],
     range: DateRange,
-    recordings: CallRecordingFile[],
     onProgress?: (progress: SyncProgress) => void,
   ): Promise<SyncSummary> {
-    const usedRecordingPaths = new Set<string>();
-    const prepared: PreparedCall[] = calls.map(call => {
-      const recording = RecordingMatcher.findMatchForCall(
-        call,
-        recordings,
-        usedRecordingPaths,
-      );
-      if (recording) usedRecordingPaths.add(recording.filePath);
-      return { call, recording };
-    });
-
-    const result = emptySummary();
+    const result = emptyCallSummary();
     let completed = 0;
 
-    for (const chunk of chunkArray(prepared, SYNC_CHUNK_SIZE)) {
+    for (const chunk of chunkArray(calls, SYNC_CHUNK_SIZE)) {
       try {
-        const chunkResult = await this.syncChunk(chunk, range);
-        mergeSummary(result, chunkResult);
+        const chunkResult = await this.syncCallChunk(chunk, range);
+        mergeCallSummary(result, chunkResult);
       } catch (error: any) {
         const message =
           error?.name === 'AbortError'
             ? 'A sync request timed out. Retry the same range; CRM deduplication makes retries safe.'
             : error?.message || 'Sync request failed.';
+
+        result.totalReceived += chunk.length;
+        result.failed += chunk.length;
+        result.errors.push(message);
+        result.failedItems.push(
+          ...chunk.map(call => ({
+            uniqueCallId: call.uniqueCallId,
+            reason: message,
+          })),
+        );
+      }
+
+      completed += chunk.length;
+      onProgress?.({completed, total: calls.length});
+    }
+
+    result.uploadedIds = Array.from(new Set(result.uploadedIds));
+    result.duplicateIds = Array.from(new Set(result.duplicateIds));
+    return result;
+  }
+
+  private async syncCallChunk(
+    calls: CallLogEntry[],
+    range: DateRange,
+  ): Promise<SyncSummary> {
+    const formData = new FormData();
+
+    formData.append(
+      'payload',
+      JSON.stringify({
+        startDateKey: range.startDateKey,
+        endDateKey: range.endDateKey,
+        startTimestamp: range.startTimestamp,
+        endTimestamp: range.endTimestamp,
+        calls: calls.map(call => ({
+          id: call.id,
+          remoteName: call.remoteName,
+          remoteNumber: call.remoteNumber,
+          callerName: call.callerName,
+          callerNumber: call.callerNumber,
+          receiverName: call.receiverName,
+          receiverNumber: call.receiverNumber,
+          callType: call.callType,
+          duration: call.duration,
+          timestamp: call.timestamp,
+          uniqueCallId: call.uniqueCallId,
+        })),
+      }),
+    );
+
+    const response = await fetchWithTimeout(
+      `${API_BASE_URL}/api/calls/sync`,
+      {
+        method: 'POST',
+        headers: {
+          'X-API-Key': API_KEY,
+          // Do not set Content-Type. React Native adds the multipart boundary.
+        },
+        body: formData,
+      },
+      UPLOAD_TIMEOUT_MS,
+    );
+
+    const json = await response.json().catch(() => ({}));
+
+    if (!response.ok || json.success === false) {
+      throw new Error(json.error || `Sync failed with HTTP ${response.status}`);
+    }
+
+    return {
+      ...emptyCallSummary(),
+      ...(json.data || {}),
+      errors: json.data?.errors || [],
+    };
+  }
+
+  /**
+   * Call Recordings screen flow.
+   *
+   * Every item already has a conservative recording -> call match.
+   * The backend re-validates the canonical call hash, finds the EXISTING CRM
+   * record by Unique_Call_ID, and attaches the file. It never creates a call.
+   */
+  async syncRecordings(
+    items: RecordingUploadItem[],
+    range: DateRange,
+    onProgress?: (progress: SyncProgress) => void,
+  ): Promise<RecordingSyncSummary> {
+    const result = emptyRecordingSummary();
+    let completed = 0;
+
+    for (const chunk of chunkArray(items, SYNC_CHUNK_SIZE)) {
+      try {
+        const chunkResult = await this.syncRecordingChunk(chunk, range);
+        mergeRecordingSummary(result, chunkResult);
+      } catch (error: any) {
+        const message =
+          error?.name === 'AbortError'
+            ? 'A recording upload request timed out. You can safely retry the same date range.'
+            : error?.message || 'Recording upload failed.';
 
         result.totalReceived += chunk.length;
         result.failed += chunk.length;
@@ -124,21 +257,23 @@ class ApiServiceClass {
       }
 
       completed += chunk.length;
-      onProgress?.({ completed, total: prepared.length });
+      onProgress?.({completed, total: items.length});
     }
 
-    result.uploadedIds = Array.from(new Set(result.uploadedIds));
-    result.duplicateIds = Array.from(new Set(result.duplicateIds));
+    result.attachedIds = Array.from(new Set(result.attachedIds));
+    result.alreadyAttachedIds = Array.from(new Set(result.alreadyAttachedIds));
+    result.notFoundIds = Array.from(new Set(result.notFoundIds));
+
     return result;
   }
 
-  private async syncChunk(
-    items: PreparedCall[],
+  private async syncRecordingChunk(
+    items: RecordingUploadItem[],
     range: DateRange,
-  ): Promise<SyncSummary> {
+  ): Promise<RecordingSyncSummary> {
     const formData = new FormData();
 
-    const payloadCalls = items.map(({ call, recording }) => ({
+    const payloadCalls = items.map(({call}) => ({
       id: call.id,
       remoteName: call.remoteName,
       remoteNumber: call.remoteNumber,
@@ -150,7 +285,7 @@ class ApiServiceClass {
       duration: call.duration,
       timestamp: call.timestamp,
       uniqueCallId: call.uniqueCallId,
-      audioField: recording ? `audio_${call.uniqueCallId}` : null,
+      audioField: `audio_${call.uniqueCallId}`,
     }));
 
     formData.append(
@@ -164,8 +299,7 @@ class ApiServiceClass {
       }),
     );
 
-    items.forEach(({ call, recording }) => {
-      if (!recording) return;
+    items.forEach(({call, recording}) => {
       formData.append(
         `audio_${call.uniqueCallId}`,
         {
@@ -177,13 +311,12 @@ class ApiServiceClass {
     });
 
     const response = await fetchWithTimeout(
-      `${API_BASE_URL}/api/calls/sync`,
+      `${API_BASE_URL}/api/calls/recordings/sync`,
       {
         method: 'POST',
         headers: {
           'X-API-Key': API_KEY,
-          // Do not set Content-Type here. React Native supplies the multipart
-          // boundary automatically for FormData.
+          // Do not manually set multipart Content-Type/boundary.
         },
         body: formData,
       },
@@ -191,12 +324,15 @@ class ApiServiceClass {
     );
 
     const json = await response.json().catch(() => ({}));
+
     if (!response.ok || json.success === false) {
-      throw new Error(json.error || `Sync failed with HTTP ${response.status}`);
+      throw new Error(
+        json.error || `Recording sync failed with HTTP ${response.status}`,
+      );
     }
 
     return {
-      ...emptySummary(),
+      ...emptyRecordingSummary(),
       ...(json.data || {}),
       errors: json.data?.errors || [],
     };
@@ -207,30 +343,34 @@ class ApiServiceClass {
     missingIds: string[];
   }> {
     if (uniqueCallIds.length === 0) {
-      return { syncedIds: [], missingIds: [] };
+      return {syncedIds: [], missingIds: []};
     }
 
     const syncedIds: string[] = [];
     const missingIds: string[] = [];
+
     for (const ids of chunkArray(Array.from(new Set(uniqueCallIds)), 50)) {
       const query = encodeURIComponent(ids.join(','));
       const response = await fetchWithTimeout(
         `${API_BASE_URL}/api/calls/check-synced?ids=${query}`,
         {
           method: 'GET',
-          headers: { 'X-API-Key': API_KEY },
+          headers: {'X-API-Key': API_KEY},
         },
         UPLOAD_TIMEOUT_MS,
       );
 
       const json = await response.json().catch(() => ({}));
+
       if (!response.ok || json.success === false) {
         throw new Error(json.error || `Check failed with HTTP ${response.status}`);
       }
+
       syncedIds.push(...(json.data?.syncedIds || []));
       missingIds.push(...(json.data?.missingIds || []));
     }
-    return { syncedIds, missingIds };
+
+    return {syncedIds, missingIds};
   }
 }
 
