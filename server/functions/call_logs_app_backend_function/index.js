@@ -1,66 +1,27 @@
 'use strict';
 
-const { IncomingMessage, ServerResponse } = require("http");
-const { sendError, getPathname } = require('./utils/httpUtils');
-const logger = require('./utils/logger');
-const env = require('./config/env'); // validated at cold-start: fails fast if misconfigured
+const express = require('express');
+const apiKeyMiddleware = require('./middleware/apiKey.middleware');
+const callRoutes = require('./routes/call.routes');
+const { notFound, errorHandler } = require('./middleware/error.middleware');
 
-const handleCallLogs = require('./handlers/callLogsHandler');
-const handleCallRecordings = require('./handlers/callRecordingsHandler');
-const handleRecordingUpload = require('./handlers/recordingUploadHandler');
+const app = express();
 
-/**
- * @param {IncomingMessage} req
- * @param {ServerResponse} res
- */
-module.exports = async (req, res) => {
-  const url = getPathname(req);
+// JSON is still useful for health/future APIs. /sync itself is multipart and
+// Multer parses that route before the controller.
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
-  try {
-    // --- Simple shared-secret auth for the mobile app ---------------
-    const apiKey = req.headers['x-api-key'];
-    if (url !== '/' && apiKey !== env.mobileApiKey) {
-      sendError(res, 401, 'Unauthorized: missing or invalid X-API-Key header');
-      return;
-    }
+app.get('/', (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: 'Call Logs API is running',
+  });
+});
 
-    switch (url) {
-      case '/':
-        res.writeHead(200, { 'Content-Type': 'text/html' });
-        res.write('<h1>Hello from index.js</h1>');
-        res.end();
-        return;
+app.use('/api/calls', apiKeyMiddleware, callRoutes);
+app.use(notFound);
+app.use(errorHandler);
 
-      case '/call-logs':
-        if (req.method !== 'POST') {
-          sendError(res, 405, 'Method not allowed. Use POST.');
-          return;
-        }
-        await handleCallLogs(req, res);
-        return;
-
-      case '/call-recordings':
-        if (req.method !== 'POST') {
-          sendError(res, 405, 'Method not allowed. Use POST.');
-          return;
-        }
-        await handleCallRecordings(req, res);
-        return;
-
-      case '/call-recordings/upload':
-        if (req.method !== 'POST') {
-          sendError(res, 405, 'Method not allowed. Use POST.');
-          return;
-        }
-        await handleRecordingUpload(req, res);
-        return;
-
-      default:
-        sendError(res, 404, `You might find the page you are looking for at "/", "/call-logs", "/call-recordings", or "/call-recordings/upload"`);
-        return;
-    }
-  } catch (err) {
-    logger.error('[index] Unhandled error:', err);
-    sendError(res, 500, 'Internal server error');
-  }
-};
+// Catalyst Advanced I/O owns the HTTP server/port. Do NOT call app.listen().
+module.exports = app;

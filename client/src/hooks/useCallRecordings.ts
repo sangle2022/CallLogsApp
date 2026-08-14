@@ -18,7 +18,9 @@ interface UseCallRecordingsResult {
   refresh: () => Promise<void>;
 }
 
-export function useCallRecordings(): UseCallRecordingsResult {
+export function useCallRecordings(
+  enabled: boolean,
+): UseCallRecordingsResult {
   const [recordings, setRecordings] = useState<CallRecordingFile[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -26,6 +28,11 @@ export function useCallRecordings(): UseCallRecordingsResult {
   const [permanentlyDenied, setPermanentlyDenied] = useState<boolean>(false);
 
   const load = useCallback(async () => {
+    if (!enabled) {
+  setRecordings([]);
+  setLoading(false);
+  return;
+}
     setLoading(true);
     setError(null);
 
@@ -49,7 +56,7 @@ export function useCallRecordings(): UseCallRecordingsResult {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [enabled]);
 
   useEffect(() => {
     load();

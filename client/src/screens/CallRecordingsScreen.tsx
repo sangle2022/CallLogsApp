@@ -1,190 +1,134 @@
-// // /**
-// //  * CallRecordingsScreen.tsx
-// //  * Displays call-recording audio files found on device storage in a FlatList.
-// //  * Data logic lives in `useCallRecordings`; this component only renders UI.
-// //  */
-// // import React from 'react';
-// // import { FlatList, RefreshControl, StyleSheet, View } from 'react-native';
-// // import { useCallRecordings } from '../hooks/useCallRecordings';
-// // import RecordingItem from '../components/RecordingItem';
-// // import LoadingIndicator from '../components/LoadingIndicator';
-// // import EmptyState from '../components/EmptyState';
-// // import { COLORS } from '../utils/constants';
-// // import { CallRecordingFile } from '../types/Recording.types';
-
-// // export default function CallRecordingsScreen() {
-// //   const { recordings, loading, error, permissionDenied, refresh } = useCallRecordings();
-
-// //   if (loading) {
-// //     return <LoadingIndicator message="Scanning for call recordings..." />;
-// //   }
-
-// //   if (permissionDenied) {
-// //     return (
-// //       <EmptyState
-// //         title="Permission required"
-// //         description="Storage access is needed to find call recording files. Please grant the permission to continue."
-// //         actionLabel="Grant Permission"
-// //         onAction={refresh}
-// //       />
-// //     );
-// //   }
-
-// //   if (error) {
-// //     return (
-// //       <EmptyState title="Something went wrong" description={error} actionLabel="Retry" onAction={refresh} />
-// //     );
-// //   }
-
-// //   if (recordings.length === 0) {
-// //     return (
-// //       <EmptyState
-// //         title="No recordings found"
-// //         description="No call recording files were found in common recording folders on this device."
-// //         actionLabel="Rescan"
-// //         onAction={refresh}
-// //       />
-// //     );
-// //   }
-
-// //   return (
-// //     <View style={styles.container}>
-// //       <FlatList
-// //         data={recordings}
-// //         keyExtractor={(item: CallRecordingFile) => item.id}
-// //         renderItem={({ item }) => <RecordingItem recording={item} />}
-// //         contentContainerStyle={styles.listContent}
-// //         refreshControl={
-// //           <RefreshControl refreshing={false} onRefresh={refresh} colors={[COLORS.primary]} />
-// //         }
-// //         initialNumToRender={20}
-// //         windowSize={10}
-// //       />
-// //     </View>
-// //   );
-// // }
-
-// // const styles = StyleSheet.create({
-// //   container: { flex: 1, backgroundColor: COLORS.background },
-// //   listContent: { paddingVertical: 10 },
-// // });
-
-
-// /**
-//  * CallRecordingsScreen.tsx
-//  * CHANGE: shows "Open Settings" when storage/all-files-access is
-//  * permanently denied (this is the normal, expected path on API 30+ since
-//  * MANAGE_EXTERNAL_STORAGE can never be granted via a popup at all).
-//  */
-// import React from 'react';
-// import { FlatList, RefreshControl, StyleSheet, View } from 'react-native';
-// import { useCallRecordings } from '../hooks/useCallRecordings';
-// import RecordingItem from '../components/RecordingItem';
-// import LoadingIndicator from '../components/LoadingIndicator';
-// import EmptyState from '../components/EmptyState';
-// import { COLORS } from '../utils/constants';
-// import { CallRecordingFile } from '../types/Recording.types';
-// import { PermissionManager } from '../permissions/PermissionManager';
-
-// export default function CallRecordingsScreen() {
-//   const { recordings, loading, error, permissionDenied, permanentlyDenied, refresh } = useCallRecordings();
-
-//   if (loading) {
-//     return <LoadingIndicator message="Scanning for call recordings..." />;
-//   }
-
-//   if (permissionDenied) {
-//     return (
-//       <EmptyState
-//         title="Permission required"
-//         description={
-//           permanentlyDenied
-//             ? "This app needs 'All files access' to read call recording folders, which can only be turned on from Settings. Tap below, enable 'Allow access to manage all files', then come back and tap Rescan."
-//             : 'Storage access is needed to find call recording files. Please grant the permission to continue.'
-//         }
-//         actionLabel={permanentlyDenied ? 'Open Settings' : 'Grant Permission'}
-//         onAction={async () => {
-//           if (permanentlyDenied) {
-//             await PermissionManager.openManageStorageSettings();
-//           } else {
-//             await refresh();
-//           }
-//         }}
-//       />
-//     );
-//   }
-
-//   if (error) {
-//     return (
-//       <EmptyState title="Something went wrong" description={error} actionLabel="Retry" onAction={refresh} />
-//     );
-//   }
-
-//   if (recordings.length === 0) {
-//     return (
-//       <EmptyState
-//         title="No recordings found"
-//         description="No audio files were found in known recording folders. If you're on an emulator, add test files via adb, or use a physical device that has actually recorded calls."
-//         actionLabel="Rescan"
-//         onAction={refresh}
-//       />
-//     );
-//   }
-
-//   return (
-//     <View style={styles.container}>
-//       <FlatList
-//         data={recordings}
-//         keyExtractor={(item: CallRecordingFile) => item.id}
-//         renderItem={({ item }) => <RecordingItem recording={item} />}
-//         contentContainerStyle={styles.listContent}
-//         refreshControl={
-//           <RefreshControl refreshing={false} onRefresh={refresh} colors={[COLORS.primary]} />
-//         }
-//         initialNumToRender={20}
-//         windowSize={10}
-//       />
-//     </View>
-//   );
-// }
-
-// const styles = StyleSheet.create({
-//   container: { flex: 1, backgroundColor: COLORS.background },
-//   listContent: { paddingVertical: 10 },
-// });
-
 /**
  * CallRecordingsScreen.tsx
- * ADDED (existing loading/permission/error/empty states unchanged): an
- * upload FAB that opens UploadOptionsModal, letting the user push
- * Today / All / Custom-range recordings (audio + metadata) to the CRM
- * backend via ApiService.
+ *
+ * Responsibilities:
+ * - Read the saved local user identity
+ * - Scan local recording folders
+ * - Display discovered recordings
+ *
+ * Identity is NOT edited from this screen.
+ *
+ * Recording upload/sync can later be added as a
+ * separate flow that matches a recording to a call
+ * and attaches it to the existing CRM call record.
  */
-import React from 'react';
-import { FlatList, RefreshControl, StyleSheet, View } from 'react-native';
-import { useCallRecordings } from '../hooks/useCallRecordings';
+
+import React, {
+  useCallback,
+} from 'react';
+
+import {
+  FlatList,
+  RefreshControl,
+  StyleSheet,
+  View,
+} from 'react-native';
+
+import {
+  useFocusEffect,
+} from '@react-navigation/native';
+
+import type {
+  NativeStackScreenProps,
+} from '@react-navigation/native-stack';
+
+import type {
+  RootStackParamList,
+} from '../navigation/AppNavigator';
+
+import {useCallRecordings} from '../hooks/useCallRecordings';
+import {useLocalIdentity} from '../hooks/useLocalIdentity';
+
 import RecordingItem from '../components/RecordingItem';
 import LoadingIndicator from '../components/LoadingIndicator';
 import EmptyState from '../components/EmptyState';
-import UploadFab from '../components/UploadFab';
-import UploadOptionsModal from '../components/UploadOptionsModal';
-import { COLORS } from '../utils/constants';
-import { CallRecordingFile } from '../types/Recording.types';
-import { PermissionManager } from '../permissions/PermissionManager';
-import { useUploadFlow } from '../hooks/useUploadFlow';
-import { ApiService } from '../services/ApiService';
 
-export default function CallRecordingsScreen() {
-  const { recordings, loading, error, permissionDenied, permanentlyDenied, refresh } = useCallRecordings();
+import {COLORS} from '../utils/constants';
 
-  const upload = useUploadFlow<CallRecordingFile>({
-    items: recordings,
-    getTimestamp: file => file.createdDate,
-    uploadFn: ApiService.uploadRecordings.bind(ApiService),
-  });
+import {
+  CallRecordingFile,
+} from '../types/Recording.types';
+
+import {
+  PermissionManager,
+} from '../permissions/PermissionManager';
+
+type Props = NativeStackScreenProps<
+  RootStackParamList,
+  'CallRecordings'
+>;
+
+export default function CallRecordingsScreen({
+  navigation,
+}: Props) {
+  /**
+   * Identity is read-only here.
+   *
+   * No modal is shown from the recording screen.
+   */
+  const {
+    identity,
+    loadingIdentity,
+    reloadIdentity,
+  } = useLocalIdentity();
+
+  /**
+   * Reload the identity whenever this
+   * screen receives focus.
+   *
+   * This guarantees that edits made on Home
+   * are immediately available here.
+   */
+  useFocusEffect(
+    useCallback(() => {
+      reloadIdentity();
+    }, [reloadIdentity]),
+  );
+
+  /**
+   * Recording scanning starts only after
+   * the user identity exists.
+   */
+  const {
+    recordings,
+    loading,
+    error,
+    permissionDenied,
+    permanentlyDenied,
+    refresh,
+  } = useCallRecordings(
+    Boolean(identity),
+  );
+
+  if (loadingIdentity) {
+    return (
+      <LoadingIndicator message="Loading user details..." />
+    );
+  }
+
+  /**
+   * Safety guard in case somebody reaches
+   * this route without completing setup.
+   */
+  if (!identity) {
+    return (
+      <EmptyState
+        title="User details required"
+        description={
+          'Your user name and phone number are not configured. Please configure them from the Home screen first.'
+        }
+        actionLabel="Go to Home"
+        onAction={() =>
+          navigation.navigate('Home')
+        }
+      />
+    );
+  }
 
   if (loading) {
-    return <LoadingIndicator message="Scanning for call recordings..." />;
+    return (
+      <LoadingIndicator message="Scanning for call recordings..." />
+    );
   }
 
   if (permissionDenied) {
@@ -193,16 +137,23 @@ export default function CallRecordingsScreen() {
         title="Permission required"
         description={
           permanentlyDenied
-            ? "This app needs 'All files access' to read call recording folders, which can only be turned on from Settings. Tap below, enable 'Allow access to manage all files', then come back and tap Rescan."
-            : 'Storage access is needed to find call recording files. Please grant the permission to continue.'
+            ? 'This app needs storage access to read call recording folders. Enable the required storage access in Settings, then return and rescan.'
+            : 'Storage access is needed to find call recording files.'
         }
-        actionLabel={permanentlyDenied ? 'Open Settings' : 'Grant Permission'}
+        actionLabel={
+          permanentlyDenied
+            ? 'Open Settings'
+            : 'Grant Permission'
+        }
         onAction={async () => {
           if (permanentlyDenied) {
-            await PermissionManager.openManageStorageSettings();
-          } else {
-            await refresh();
+            await PermissionManager
+              .openManageStorageSettings();
+
+            return;
           }
+
+          await refresh();
         }}
       />
     );
@@ -210,7 +161,12 @@ export default function CallRecordingsScreen() {
 
   if (error) {
     return (
-      <EmptyState title="Something went wrong" description={error} actionLabel="Retry" onAction={refresh} />
+      <EmptyState
+        title="Something went wrong"
+        description={error}
+        actionLabel="Retry"
+        onAction={refresh}
+      />
     );
   }
 
@@ -218,7 +174,7 @@ export default function CallRecordingsScreen() {
     return (
       <EmptyState
         title="No recordings found"
-        description="No audio files were found in known recording folders. If you're on an emulator, add test files via adb, or use a physical device that has actually recorded calls."
+        description="No audio files were found in known recording folders on this device."
         actionLabel="Rescan"
         onAction={refresh}
       />
@@ -229,31 +185,36 @@ export default function CallRecordingsScreen() {
     <View style={styles.container}>
       <FlatList
         data={recordings}
-        keyExtractor={(item: CallRecordingFile) => item.id}
-        renderItem={({ item }) => <RecordingItem recording={item} />}
-        contentContainerStyle={styles.listContent}
+        keyExtractor={(
+          item: CallRecordingFile,
+        ) => item.id}
+        renderItem={({item}) => (
+          <RecordingItem recording={item} />
+        )}
+        contentContainerStyle={
+          styles.listContent
+        }
         refreshControl={
-          <RefreshControl refreshing={false} onRefresh={refresh} colors={[COLORS.primary]} />
+          <RefreshControl
+            refreshing={false}
+            onRefresh={refresh}
+            colors={[COLORS.primary]}
+          />
         }
         initialNumToRender={20}
         windowSize={10}
-      />
-
-      <UploadFab onPress={upload.openModal} />
-
-      <UploadOptionsModal
-        visible={upload.modalVisible}
-        uploading={upload.uploading}
-        progress={upload.progress}
-        onClose={upload.closeModal}
-        onConfirm={upload.confirmUpload}
-        title="Upload Recordings"
       />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.background },
-  listContent: { paddingVertical: 10, paddingBottom: 90 }, // extra bottom space so FAB doesn't cover last row
+  container: {
+    flex: 1,
+    backgroundColor: COLORS.background,
+  },
+
+  listContent: {
+    paddingVertical: 10,
+  },
 });

@@ -1,8 +1,3 @@
-/**
- * CallLogItem.tsx
- * Presentational component - renders a single call log row.
- * No business logic here; all data comes in via props.
- */
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { CallLogEntry, CallType } from '../types/CallLog.types';
@@ -11,51 +6,44 @@ import { COLORS } from '../utils/constants';
 
 interface Props {
   entry: CallLogEntry;
+  acknowledged?: boolean;
 }
 
-// Small helper to give each call type a distinct color/label.
 function getCallTypeStyle(type: CallType): { label: string; color: string } {
   switch (type) {
-    case CallType.INCOMING:
-      return { label: 'Incoming', color: COLORS.success };
-    case CallType.OUTGOING:
-      return { label: 'Outgoing', color: COLORS.primary };
-    case CallType.MISSED:
-      return { label: 'Missed', color: COLORS.danger };
-    case CallType.REJECTED:
-      return { label: 'Rejected', color: COLORS.danger };
-    case CallType.BLOCKED:
-      return { label: 'Blocked', color: COLORS.danger };
-    case CallType.VOICEMAIL:
-      return { label: 'Voicemail', color: COLORS.textSecondary };
-    default:
-      return { label: 'Unknown', color: COLORS.textSecondary };
+    case CallType.INCOMING: return { label: 'Incoming', color: COLORS.success };
+    case CallType.OUTGOING: return { label: 'Outgoing', color: COLORS.primary };
+    case CallType.MISSED: return { label: 'Missed', color: COLORS.danger };
+    case CallType.REJECTED: return { label: 'Rejected', color: COLORS.danger };
+    case CallType.BLOCKED: return { label: 'Blocked', color: COLORS.danger };
+    case CallType.VOICEMAIL: return { label: 'Voicemail', color: COLORS.textSecondary };
+    default: return { label: 'Unknown', color: COLORS.textSecondary };
   }
 }
 
-function CallLogItem({ entry }: Props) {
+function CallLogItem({ entry, acknowledged = false }: Props) {
   const typeStyle = getCallTypeStyle(entry.callType);
-
   return (
     <View style={styles.container}>
       <View style={styles.row}>
         <Text style={styles.name} numberOfLines={1}>
-          {entry.callerName}
+          {entry.callerName} → {entry.receiverName}
         </Text>
-        <Text style={[styles.callType, { color: typeStyle.color }]}>
-          {typeStyle.label}
-        </Text>
+        <Text style={[styles.callType, { color: typeStyle.color }]}>{typeStyle.label}</Text>
       </View>
-      <Text style={styles.number}>{entry.phoneNumber}</Text>
+
+      <Text style={styles.number} numberOfLines={1}>
+        Remote: {entry.remoteName} · {entry.remoteNumber}
+      </Text>
+
       <View style={styles.row}>
-        <Text style={styles.meta}>{formatDuration(entry.duration)}</Text>
-        <Text style={styles.meta}>{entry.dateTime}</Text>
+        <Text style={styles.meta}>{formatDuration(entry.duration)} · {entry.dateTime}</Text>
+        {acknowledged ? <Text style={styles.synced}>Previously synced</Text> : null}
       </View>
     </View>
   );
 }
 
-// Memoized since call logs can be long lists that re-render on scroll.
 export default React.memo(CallLogItem);
 
 const styles = StyleSheet.create({
@@ -68,30 +56,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.border,
   },
-  row: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  name: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: COLORS.textPrimary,
-    flexShrink: 1,
-  },
-  callType: {
-    fontSize: 12,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-  },
-  number: {
-    fontSize: 13,
-    color: COLORS.textSecondary,
-    marginTop: 2,
-  },
-  meta: {
-    fontSize: 12,
-    color: COLORS.textSecondary,
-    marginTop: 6,
-  },
+  row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 10 },
+  name: { fontSize: 15, fontWeight: '600', color: COLORS.textPrimary, flex: 1 },
+  callType: { fontSize: 12, fontWeight: '700', textTransform: 'uppercase' },
+  number: { fontSize: 13, color: COLORS.textSecondary, marginTop: 4 },
+  meta: { fontSize: 12, color: COLORS.textSecondary, marginTop: 7, flexShrink: 1 },
+  synced: { fontSize: 11, color: COLORS.success, fontWeight: '700', marginTop: 7 },
 });
