@@ -1,22 +1,26 @@
 {
-	"deployment": {
-		"name": "call_logs_app_backend_function",
-		"stack": "node24",
-		"type": "advancedio",
-		"env_variables": {
-			"ZOHO_DC": "in",
-			"ZOHO_CLIENT_ID": "1000.8S1Y38QSWQXGNGQ9DE6Y733YO7QHRQ",
-			"ZOHO_CLIENT_SECRET": "dda1b78a7750d8d528208bb068d2788bfc64eb8d03",
-			"ZOHO_REFRESH_TOKEN": "1000.079f99d1137e33a34a1bc1a6b82ac56e.3084fb9aacabbab6bef1bd3ac2d3da0b",
-			"ZOHO_CRM_CALL_LOGS_MODULE": "Mobile_Call_Records",
-			"ZOHO_CRM_CALL_RECORDINGS_MODULE": "Mobile_Call_Recordings",
-			"MOBILE_API_KEY": "K8vP4xN7qL2mR9tY6wC3sF5hJ1dZ0aB8",
-			"ZOHO_CRM_API_VERSION": "v8",
-			"CRM_BATCH_SIZE": "100",
-			"MAX_UPLOAD_SIZE_BYTES": "26214400"
-		}
-	},
-	"execution": {
-		"main": "index.js"
-	}
+  "deployment": {
+    "name": "call_logs_app_backend_function",
+    "stack": "node24",
+    "type": "advancedio",
+    "env_variables": {
+      "ZOHO_DC": "in",
+      "ZOHO_CLIENT_ID": "1000.8S1Y38QSWQXGNGQ9DE6Y733YO7QHRQ",
+      "ZOHO_CLIENT_SECRET": "dda1b78a7750d8d528208bb068d2788bfc64eb8d03",
+      "ZOHO_REFRESH_TOKEN": "1000.079f99d1137e33a34a1bc1a6b82ac56e.3084fb9aacabbab6bef1bd3ac2d3da0b",
+      "ZOHO_CRM_CALL_LOGS_MODULE": "Mobile_Call_Records",
+      "ZOHO_CRM_RECORDINGS_MODULE": "Mobile_Call_Recordings",
+      "MOBILE_API_KEY": "K8vP4xN7qL2mR9tY6wC3sF5hJ1dZ0aB8",
+      "ZOHO_CRM_API_VERSION": "v8",
+      "CRM_BATCH_SIZE": "100",
+      "MAX_UPLOAD_SIZE_BYTES": "26214400",
+
+      "MAX_SYNC_RANGE_DAYS": "7",
+      "MAX_CALLS_PER_SYNC_REQUEST": "5",
+      "MAX_RECORDINGS_PER_SYNC_REQUEST": "1"
+    }
+  },
+  "execution": {
+    "main": "index.js"
+  }
 }

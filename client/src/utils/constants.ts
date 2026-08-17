@@ -9,16 +9,33 @@ import RNFS from 'react-native-fs';
 // Common directories where OEM dialers / recorder apps store call recordings.
 // We scan all of these (skipping any that don't exist) and merge results.
 export const CALL_RECORDING_DIRECTORIES: string[] = Platform.select({
-  android: [
-    `${RNFS.ExternalStorageDirectoryPath}/Call`,                       // Generic
-    `${RNFS.ExternalStorageDirectoryPath}/CallRecordings`,             // Generic
-    `${RNFS.ExternalStorageDirectoryPath}/Recordings/Call Recordings`, // MIUI / Xiaomi
-    `${RNFS.ExternalStorageDirectoryPath}/MIUI/sound_recorder/call_rec`, // MIUI legacy
-    `${RNFS.ExternalStorageDirectoryPath}/Android/data/com.samsung.android.dialer/files/Recordings`, // Samsung
-    `${RNFS.ExternalStorageDirectoryPath}/Sounds/CallRecordings`,      // OnePlus / Oppo
-    `${RNFS.ExternalStorageDirectoryPath}/PhoneRecord`,                // Vivo
-    `${RNFS.ExternalStorageDirectoryPath}/Music/CallRecordings`,       // Some OEMs store under Music
-  ],
+ android: [
+  `${RNFS.ExternalStorageDirectoryPath}/Call`,
+  `${RNFS.ExternalStorageDirectoryPath}/Calls`,
+
+  `${RNFS.ExternalStorageDirectoryPath}/CallRecordings`,
+  `${RNFS.ExternalStorageDirectoryPath}/Call Recordings`,
+
+  `${RNFS.ExternalStorageDirectoryPath}/Recordings/Call`,
+  `${RNFS.ExternalStorageDirectoryPath}/Recordings/Calls`,
+  `${RNFS.ExternalStorageDirectoryPath}/Recordings/CallRecordings`,
+  `${RNFS.ExternalStorageDirectoryPath}/Recordings/Call Recordings`,
+
+  `${RNFS.ExternalStorageDirectoryPath}/Recorder/Call`,
+  `${RNFS.ExternalStorageDirectoryPath}/Recorder/Calls`,
+  `${RNFS.ExternalStorageDirectoryPath}/Recorder/CallRecordings`,
+  `${RNFS.ExternalStorageDirectoryPath}/Recorder/Call Recordings`,
+
+  `${RNFS.ExternalStorageDirectoryPath}/MIUI/sound_recorder/call_rec`,
+
+  `${RNFS.ExternalStorageDirectoryPath}/Sounds/CallRecordings`,
+  `${RNFS.ExternalStorageDirectoryPath}/Sounds/Call Recordings`,
+
+  `${RNFS.ExternalStorageDirectoryPath}/PhoneRecord`,
+
+  `${RNFS.ExternalStorageDirectoryPath}/Music/CallRecordings`,
+  `${RNFS.ExternalStorageDirectoryPath}/Music/Call Recordings`,
+],
   default: [],
 }) as string[];
 

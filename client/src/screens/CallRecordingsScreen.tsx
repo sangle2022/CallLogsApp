@@ -1,53 +1,48 @@
 /**
  * CallRecordingsScreen.tsx
  *
- * Recording sync:
+ * Recordings are now a completely independent CRM data flow:
  *
- * recording
- * -> matching Android call
- * -> Unique_Call_ID
- * -> existing CRM call
- * -> attachment
+ * local audio file
+ *   -> file metadata + SHA-256 content hash
+ *   -> Mobile_Call_Recordings CRM record
+ *   -> audio attached to that recording record
+ *
+ * There is intentionally NO recording-to-call-log matching on this screen.
  */
+import React, {useCallback} from 'react';
+import {
+  FlatList,
+  RefreshControl,
+  StyleSheet,
+  View,
+} from 'react-native';
+import {useFocusEffect} from '@react-navigation/native';
+import type {NativeStackScreenProps} from '@react-navigation/native-stack';
+import type {RootStackParamList} from '../navigation/AppNavigator';
 
-import React, { useCallback } from 'react';
-
-import { FlatList, RefreshControl, StyleSheet, View } from 'react-native';
-
-import { useFocusEffect } from '@react-navigation/native';
-
-import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-
-import type { RootStackParamList } from '../navigation/AppNavigator';
-
-import { useCallRecordings } from '../hooks/useCallRecordings';
-
-import { useLocalIdentity } from '../hooks/useLocalIdentity';
-
-import { useRecordingSync } from '../hooks/useRecordingSync';
+import {useCallRecordings} from '../hooks/useCallRecordings';
+import {useLocalIdentity} from '../hooks/useLocalIdentity';
+import {useRecordingSync} from '../hooks/useRecordingSync';
 
 import RecordingItem from '../components/RecordingItem';
-
 import LoadingIndicator from '../components/LoadingIndicator';
-
 import EmptyState from '../components/EmptyState';
-
 import UploadFab from '../components/UploadFab';
-
 import SyncDateRangeModal from '../components/SyncDateRangeModal';
 
-import SafeScreen from '../components/SafeScreen';
-
-import { COLORS } from '../utils/constants';
-
-import { CallRecordingFile } from '../types/Recording.types';
-
-import { PermissionManager } from '../permissions/PermissionManager';
+import {COLORS} from '../utils/constants';
+import {CallRecordingFile} from '../types/Recording.types';
+import {PermissionManager} from '../permissions/PermissionManager';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'CallRecordings'>;
 
-export default function CallRecordingsScreen({ navigation }: Props) {
-  const { identity, loadingIdentity, reloadIdentity } = useLocalIdentity();
+export default function CallRecordingsScreen({navigation}: Props) {
+  const {
+    identity,
+    loadingIdentity,
+    reloadIdentity,
+  } = useLocalIdentity();
 
   useFocusEffect(
     useCallback(() => {
@@ -64,17 +59,14 @@ export default function CallRecordingsScreen({ navigation }: Props) {
     refresh,
   } = useCallRecordings(Boolean(identity));
 
-  const sync = useRecordingSync({
-    recordings,
-    identity,
-  });
-
-  let content: React.ReactNode;
+  const sync = useRecordingSync({recordings});
 
   if (loadingIdentity) {
-    content = <LoadingIndicator message="Loading user details..." />;
-  } else if (!identity) {
-    content = (
+    return <LoadingIndicator message="Loading user details..." />;
+  }
+
+  if (!identity) {
+    return (
       <EmptyState
         title="User details required"
         description="Your user name and phone number are not configured. Please configure them from the Home screen first."
@@ -82,10 +74,14 @@ export default function CallRecordingsScreen({ navigation }: Props) {
         onAction={() => navigation.navigate('Home')}
       />
     );
-  } else if (loading) {
-    content = <LoadingIndicator message="Scanning for call recordings..." />;
-  } else if (permissionDenied) {
-    content = (
+  }
+
+  if (loading) {
+    return <LoadingIndicator message="Scanning for call recordings..." />;
+  }
+
+  if (permissionDenied) {
+    return (
       <EmptyState
         title="Permission required"
         description={
@@ -97,7 +93,6 @@ export default function CallRecordingsScreen({ navigation }: Props) {
         onAction={async () => {
           if (permanentlyDenied) {
             await PermissionManager.openManageStorageSettings();
-
             return;
           }
 
@@ -105,8 +100,10 @@ export default function CallRecordingsScreen({ navigation }: Props) {
         }}
       />
     );
-  } else if (error) {
-    content = (
+  }
+
+  if (error) {
+    return (
       <EmptyState
         title="Something went wrong"
         description={error}
@@ -114,8 +111,10 @@ export default function CallRecordingsScreen({ navigation }: Props) {
         onAction={refresh}
       />
     );
-  } else if (recordings.length === 0) {
-    content = (
+  }
+
+  if (recordings.length === 0) {
+    return (
       <EmptyState
         title="No recordings found"
         description="No audio files were found in known recording folders on this device."
@@ -123,68 +122,59 @@ export default function CallRecordingsScreen({ navigation }: Props) {
         onAction={refresh}
       />
     );
-  } else {
-    content = (
-      <View style={styles.content}>
-        <FlatList
-          data={recordings}
-          keyExtractor={(item: CallRecordingFile) => item.id}
-          renderItem={({ item }) => <RecordingItem recording={item} />}
-          contentContainerStyle={styles.listContent}
-          refreshControl={
-            <RefreshControl
-              refreshing={false}
-              onRefresh={refresh}
-              colors={[COLORS.primary]}
-            />
-          }
-          initialNumToRender={20}
-          windowSize={10}
-        />
-
-        <UploadFab
-          onPress={sync.openModal}
-          disabled={sync.uploading}
-
-          accessibilityLabel="Upload matched call recordings to CRM"
-        />
-
-        <SyncDateRangeModal
-          visible={sync.modalVisible}
-          uploading={sync.uploading}
-          progress={sync.progress}
-          onClose={sync.closeModal}
-          onConfirm={sync.syncRange}
-          title="Sync recordings to CRM"
-          subtitle="Select the call date range. Recordings are matched to calls in this range and attached only to existing CRM call records."
-          confirmLabel="Sync recordings"
-          progressLabel="recordings"
-        />
-      </View>
-    );
   }
 
-  return <SafeScreen style={styles.container}>{content}</SafeScreen>;
+  return (
+    <View style={styles.container}>
+      <FlatList
+        data={recordings}
+        keyExtractor={(item: CallRecordingFile) => item.id}
+        renderItem={({item}) => (
+          <RecordingItem
+            recording={item}
+            synced={sync.syncedLocalIds.has(item.id)}
+          />
+        )}
+        contentContainerStyle={styles.listContent}
+        refreshControl={
+          <RefreshControl
+            refreshing={false}
+            onRefresh={refresh}
+            colors={[COLORS.primary]}
+          />
+        }
+        initialNumToRender={20}
+        windowSize={10}
+      />
+
+      <UploadFab
+        onPress={sync.openModal}
+        disabled={sync.uploading}
+        accessibilityLabel="Upload recordings to CRM"
+      />
+
+      <SyncDateRangeModal
+        visible={sync.modalVisible}
+        uploading={sync.uploading}
+        progress={sync.progress}
+        onClose={sync.closeModal}
+        onConfirm={sync.syncRange}
+        title="Upload recordings to CRM"
+        subtitle="Select a recording date range. Files are uploaded independently using their file name, size, file time and audio content. They are not matched with call logs."
+        confirmLabel="Upload recordings"
+        progressLabel="recordings"
+      />
+    </View>
+  );
 }
 
 const styles = StyleSheet.create({
   container: {
+    flex: 1,
     backgroundColor: COLORS.background,
   },
-
-  content: {
-    flex: 1,
-  },
-
   listContent: {
-    paddingTop: 10,
-
-    /**
-     * Keeps final recording above
-     * floating upload button.
-     */
+    paddingVertical: 10,
     paddingBottom: 110,
-
-    flexGrow: 1,
   },
 });

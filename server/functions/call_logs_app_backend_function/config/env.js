@@ -1,25 +1,4 @@
-/**
- * config/env.js
- * Centralised, validated access to environment variables.
- *
- * Set these in Catalyst Console:
- *   Functions -> call_logs_app_backend_function -> Environment Variables
- * (or in `.env` for local `catalyst run` testing).
- *
- * Required:
- *   ZOHO_DC                 - Data center: "com" | "in" | "eu" | "com.au" | "jp"
- *   ZOHO_CLIENT_ID          - From Zoho API Console (Server-based app)
- *   ZOHO_CLIENT_SECRET
- *   ZOHO_REFRESH_TOKEN      - Generated once via OAuth consent, never expires
- *   ZOHO_CRM_CALL_LOGS_MODULE       - API name of your custom module for call logs
- *   ZOHO_CRM_CALL_RECORDINGS_MODULE - API name of your custom module for recordings
- *   MOBILE_API_KEY          - Shared secret the mobile app sends in X-API-Key header
- *
- * Optional:
- *   ZOHO_CRM_API_VERSION    - Defaults to "v6"
- *   CRM_BATCH_SIZE          - Defaults to 100 (Zoho's max per insert call)
- *   MAX_UPLOAD_SIZE_BYTES   - Defaults to 26214400 (25 MB, Zoho CRM's own attachment cap)
- */
+"use strict";
 
 function required(name) {
   const value = process.env[name];
@@ -29,19 +8,55 @@ function required(name) {
   return value;
 }
 
+function positiveInt(name, fallback) {
+  const raw = process.env[name] || String(fallback);
+  const value = Number.parseInt(raw, 10);
+
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error(`[config] ${name} must be a positive integer`);
+  }
+
+  return value;
+}
+
+function assertModuleApiName(name, value) {
+  if (!/^[A-Za-z0-9_]+$/.test(value)) {
+    throw new Error(`[config] ${name} contains invalid characters`);
+  }
+}
+
 const env = {
-  zohoDc: process.env.ZOHO_DC || 'com',
-  clientId: required('ZOHO_CLIENT_ID'),
-  clientSecret: required('ZOHO_CLIENT_SECRET'),
-  refreshToken: required('ZOHO_REFRESH_TOKEN'),
-  callLogsModule: required('ZOHO_CRM_CALL_LOGS_MODULE'),
-  callRecordingsModule: required('ZOHO_CRM_CALL_RECORDINGS_MODULE'),
-  mobileApiKey: required('MOBILE_API_KEY'),
-  crmApiVersion: process.env.ZOHO_CRM_API_VERSION || 'v6',
-  crmBatchSize: parseInt(process.env.CRM_BATCH_SIZE || '100', 10),
-  // Zoho CRM itself rejects attachments over 25 MB - fail fast on our
-  // side with a clear error instead of letting the CRM call error out.
-  maxUploadSizeBytes: parseInt(process.env.MAX_UPLOAD_SIZE_BYTES || String(25 * 1024 * 1024), 10),
+  zohoDc: process.env.ZOHO_DC || "in",
+  clientId: required("ZOHO_CLIENT_ID"),
+  clientSecret: required("ZOHO_CLIENT_SECRET"),
+  refreshToken: required("ZOHO_REFRESH_TOKEN"),
+
+  /** Existing call-log CRM module. */
+  callLogsModule: required("ZOHO_CRM_CALL_LOGS_MODULE"),
+
+  /** NEW independent call-recording CRM module. */
+  recordingsModule: required("ZOHO_CRM_RECORDINGS_MODULE"),
+
+  mobileApiKey: required("MOBILE_API_KEY"),
+  crmApiVersion: process.env.ZOHO_CRM_API_VERSION || "v8",
+
+  maxSyncRangeDays: positiveInt("MAX_SYNC_RANGE_DAYS", 7),
+  maxCallsPerSyncRequest: positiveInt("MAX_CALLS_PER_SYNC_REQUEST", 5),
+
+  /** Upload recordings separately; default is intentionally one file/request. */
+  maxRecordingsPerSyncRequest: positiveInt(
+    "MAX_RECORDINGS_PER_SYNC_REQUEST",
+    1,
+  ),
+
+  maxAudioUploadBytes: positiveInt("MAX_AUDIO_UPLOAD_BYTES", 20 * 1024 * 1024),
 };
+
+assertModuleApiName("ZOHO_CRM_CALL_LOGS_MODULE", env.callLogsModule);
+assertModuleApiName("ZOHO_CRM_RECORDINGS_MODULE", env.recordingsModule);
+
+if (!/^v\d+$/.test(env.crmApiVersion)) {
+  throw new Error("[config] ZOHO_CRM_API_VERSION must look like v8");
+}
 
 module.exports = env;

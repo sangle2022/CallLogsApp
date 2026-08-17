@@ -12,10 +12,12 @@ export interface SyncProgress {
 
 export interface SyncFailedItem {
   uniqueCallId?: string;
+  recordingHash?: string;
+  fileName?: string;
   reason: string;
 }
 
-/** Call-log metadata sync result. */
+/** Call-log metadata sync result. DO NOT change this flow. */
 export interface SyncSummary {
   totalReceived: number;
   uploaded: number;
@@ -29,16 +31,33 @@ export interface SyncSummary {
   errors: string[];
 }
 
-/** Recording-only sync result. No CRM call record is created by this flow. */
+/**
+ * Independent recording-module sync result.
+ * Recordings do not reference or match call logs.
+ */
 export interface RecordingSyncSummary {
   totalReceived: number;
-  attached: number;
-  alreadyAttached: number;
-  notFound: number;
+  uploaded: number;
+  repaired: number;
+  skippedDuplicates: number;
   failed: number;
-  attachedIds: string[];
-  alreadyAttachedIds: string[];
-  notFoundIds: string[];
+  uploadedHashes: string[];
+  repairedHashes: string[];
+  duplicateHashes: string[];
   failedItems: SyncFailedItem[];
   errors: string[];
+}
+
+export interface RecordingCheckResult {
+  /** Recording exists in CRM and its audio attachment is present. */
+  syncedHashes: string[];
+
+  /** Exists in CRM but the prior attachment upload did not complete. */
+  incompleteHashes: string[];
+
+  /** Does not yet have a CRM record. */
+  missingHashes: string[];
+
+  /** incompleteHashes + missingHashes */
+  pendingHashes: string[];
 }

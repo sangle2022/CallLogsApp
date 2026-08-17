@@ -3,14 +3,13 @@
 const express = require('express');
 const apiKeyMiddleware = require('./middleware/apiKey.middleware');
 const callRoutes = require('./routes/call.routes');
-const { notFound, errorHandler } = require('./middleware/error.middleware');
+const recordingRoutes = require('./routes/recording.routes');
+const {notFound, errorHandler} = require('./middleware/error.middleware');
 
 const app = express();
 
-// JSON is still useful for health/future APIs. /sync itself is multipart and
-// Multer parses that route before the controller.
-app.use(express.json({ limit: '1mb' }));
-app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+app.use(express.json({limit: '1mb'}));
+app.use(express.urlencoded({extended: true, limit: '1mb'}));
 
 app.get('/', (req, res) => {
   res.status(200).json({
@@ -19,7 +18,12 @@ app.get('/', (req, res) => {
   });
 });
 
+/** Existing call-log API - unchanged. */
 app.use('/api/calls', apiKeyMiddleware, callRoutes);
+
+/** NEW completely independent recording API. */
+app.use('/api/recordings', apiKeyMiddleware, recordingRoutes);
+
 app.use(notFound);
 app.use(errorHandler);
 

@@ -1,6 +1,6 @@
 'use strict';
 
-const callSyncService = require('../services/callSync.service');
+const recordingSyncService = require('../services/recordingSync.service');
 
 function parseMultipartPayload(req) {
   if (!req.body?.payload) {
@@ -20,10 +20,14 @@ function parseMultipartPayload(req) {
   }
 }
 
-exports.syncCalls = async (req, res, next) => {
+exports.syncRecordings = async (req, res, next) => {
   try {
     const payload = parseMultipartPayload(req);
-    const result = await callSyncService.syncCalls(payload);
+
+    const result = await recordingSyncService.syncRecordings(
+      payload,
+      req.files || [],
+    );
 
     res.status(200).json({
       success: true,
@@ -36,12 +40,8 @@ exports.syncCalls = async (req, res, next) => {
 
 exports.checkSynced = async (req, res, next) => {
   try {
-    const ids = String(req.query.ids || '')
-      .split(',')
-      .map(value => value.trim())
-      .filter(Boolean);
-
-    const result = await callSyncService.checkSynced(ids);
+    const hashes = Array.isArray(req.body?.hashes) ? req.body.hashes : [];
+    const result = await recordingSyncService.checkSynced(hashes);
 
     res.status(200).json({
       success: true,

@@ -39,8 +39,8 @@ function mapCallToCrmRecord(call) {
     Call_Timestamp: toZohoDateTime(call.timestamp),
 
     // Audio is added later from the Recordings screen.
-    Recording_Attached: false,
-    Recording_File_Name: '',
+    // Recording_Attached: false,
+    // Recording_File_Name: '',
   };
 }
 

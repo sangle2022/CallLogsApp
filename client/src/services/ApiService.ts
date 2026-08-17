@@ -1,7 +1,10 @@
 import {CallLogEntry} from '../types/CallLog.types';
-import {CallRecordingFile} from '../types/Recording.types';
+import {
+  PreparedRecordingUpload,
+} from '../types/Recording.types';
 import {
   DateRange,
+  RecordingCheckResult,
   RecordingSyncSummary,
   SyncProgress,
   SyncSummary,
@@ -9,6 +12,8 @@ import {
 import {
   API_BASE_URL,
   API_KEY,
+  RECORDING_SYNC_CHUNK_SIZE,
+  REQUEST_TIMEOUT_MS,
   SYNC_CHUNK_SIZE,
   UPLOAD_TIMEOUT_MS,
 } from '../config/apiConfig';
@@ -32,9 +37,11 @@ function toFileUri(path: string): string {
 
 function chunkArray<T>(items: T[], size: number): T[][] {
   const chunks: T[][] = [];
-  for (let i = 0; i < items.length; i += size) {
-    chunks.push(items.slice(i, i + size));
+
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
   }
+
   return chunks;
 }
 
@@ -87,13 +94,13 @@ function mergeCallSummary(target: SyncSummary, incoming: SyncSummary): void {
 function emptyRecordingSummary(): RecordingSyncSummary {
   return {
     totalReceived: 0,
-    attached: 0,
-    alreadyAttached: 0,
-    notFound: 0,
+    uploaded: 0,
+    repaired: 0,
+    skippedDuplicates: 0,
     failed: 0,
-    attachedIds: [],
-    alreadyAttachedIds: [],
-    notFoundIds: [],
+    uploadedHashes: [],
+    repairedHashes: [],
+    duplicateHashes: [],
     failedItems: [],
     errors: [],
   };
@@ -104,28 +111,23 @@ function mergeRecordingSummary(
   incoming: RecordingSyncSummary,
 ): void {
   target.totalReceived += incoming.totalReceived;
-  target.attached += incoming.attached;
-  target.alreadyAttached += incoming.alreadyAttached;
-  target.notFound += incoming.notFound;
+  target.uploaded += incoming.uploaded;
+  target.repaired += incoming.repaired;
+  target.skippedDuplicates += incoming.skippedDuplicates;
   target.failed += incoming.failed;
-  target.attachedIds.push(...(incoming.attachedIds || []));
-  target.alreadyAttachedIds.push(...(incoming.alreadyAttachedIds || []));
-  target.notFoundIds.push(...(incoming.notFoundIds || []));
+  target.uploadedHashes.push(...(incoming.uploadedHashes || []));
+  target.repairedHashes.push(...(incoming.repairedHashes || []));
+  target.duplicateHashes.push(...(incoming.duplicateHashes || []));
   target.failedItems.push(...(incoming.failedItems || []));
   target.errors.push(...(incoming.errors || []));
 }
 
-export interface RecordingUploadItem {
-  call: CallLogEntry;
-  recording: CallRecordingFile;
-}
-
 class ApiServiceClass {
   /**
-   * Call Logs screen flow.
+   * CALL LOG FLOW - UNCHANGED.
    *
-   * This endpoint sends METADATA ONLY. Audio is intentionally not included.
-   * Recordings are attached later from the Call Recordings screen.
+   * Call logs continue to be deduplicated by Unique_Call_ID in the existing
+   * call-log CRM module. No recording logic is mixed into this request.
    */
   async syncCalls(
     calls: CallLogEntry[],
@@ -162,6 +164,7 @@ class ApiServiceClass {
 
     result.uploadedIds = Array.from(new Set(result.uploadedIds));
     result.duplicateIds = Array.from(new Set(result.duplicateIds));
+
     return result;
   }
 
@@ -200,7 +203,7 @@ class ApiServiceClass {
         method: 'POST',
         headers: {
           'X-API-Key': API_KEY,
-          // Do not set Content-Type. React Native adds the multipart boundary.
+          // Do not set multipart Content-Type manually.
         },
         body: formData,
       },
@@ -221,28 +224,93 @@ class ApiServiceClass {
   }
 
   /**
-   * Call Recordings screen flow.
+   * Checks the NEW independent recording CRM module before audio upload.
    *
-   * Every item already has a conservative recording -> call match.
-   * The backend re-validates the canonical call hash, finds the EXISTING CRM
-   * record by Unique_Call_ID, and attaches the file. It never creates a call.
+   * The hashes are SHA-256 values of the actual file bytes. This means moving,
+   * renaming, or seeing a different OEM file name does not create a duplicate.
+   */
+  async checkRecordings(recordingHashes: string[]): Promise<RecordingCheckResult> {
+    const uniqueHashes = Array.from(
+      new Set(recordingHashes.map(hash => String(hash).toLowerCase())),
+    );
+
+    if (uniqueHashes.length === 0) {
+      return {
+        syncedHashes: [],
+        incompleteHashes: [],
+        missingHashes: [],
+        pendingHashes: [],
+      };
+    }
+
+    const aggregate: RecordingCheckResult = {
+      syncedHashes: [],
+      incompleteHashes: [],
+      missingHashes: [],
+      pendingHashes: [],
+    };
+
+    for (const hashes of chunkArray(uniqueHashes, 50)) {
+      const response = await fetchWithTimeout(
+        `${API_BASE_URL}/api/recordings/check-synced`,
+        {
+          method: 'POST',
+          headers: {
+            'X-API-Key': API_KEY,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({hashes}),
+        },
+        REQUEST_TIMEOUT_MS,
+      );
+
+      const json = await response.json().catch(() => ({}));
+
+      if (!response.ok || json.success === false) {
+        throw new Error(
+          json.error || `Recording check failed with HTTP ${response.status}`,
+        );
+      }
+
+      aggregate.syncedHashes.push(...(json.data?.syncedHashes || []));
+      aggregate.incompleteHashes.push(...(json.data?.incompleteHashes || []));
+      aggregate.missingHashes.push(...(json.data?.missingHashes || []));
+      aggregate.pendingHashes.push(...(json.data?.pendingHashes || []));
+    }
+
+    aggregate.syncedHashes = Array.from(new Set(aggregate.syncedHashes));
+    aggregate.incompleteHashes = Array.from(
+      new Set(aggregate.incompleteHashes),
+    );
+    aggregate.missingHashes = Array.from(new Set(aggregate.missingHashes));
+    aggregate.pendingHashes = Array.from(new Set(aggregate.pendingHashes));
+
+    return aggregate;
+  }
+
+  /**
+   * INDEPENDENT RECORDING FLOW.
+   *
+   * Each recording becomes a record in the new recording CRM module and the
+   * actual audio file is attached to that recording record.
+   *
+   * There is intentionally NO CallLogEntry and NO RecordingMatcher here.
    */
   async syncRecordings(
-    items: RecordingUploadItem[],
-    range: DateRange,
+    items: PreparedRecordingUpload[],
     onProgress?: (progress: SyncProgress) => void,
   ): Promise<RecordingSyncSummary> {
     const result = emptyRecordingSummary();
     let completed = 0;
 
-    for (const chunk of chunkArray(items, SYNC_CHUNK_SIZE)) {
+    for (const chunk of chunkArray(items, RECORDING_SYNC_CHUNK_SIZE)) {
       try {
-        const chunkResult = await this.syncRecordingChunk(chunk, range);
+        const chunkResult = await this.syncRecordingChunk(chunk);
         mergeRecordingSummary(result, chunkResult);
       } catch (error: any) {
         const message =
           error?.name === 'AbortError'
-            ? 'A recording upload request timed out. You can safely retry the same date range.'
+            ? 'A recording upload request timed out. You can safely retry; CRM content-hash deduplication prevents duplicate records.'
             : error?.message || 'Recording upload failed.';
 
         result.totalReceived += chunk.length;
@@ -250,7 +318,8 @@ class ApiServiceClass {
         result.errors.push(message);
         result.failedItems.push(
           ...chunk.map(item => ({
-            uniqueCallId: item.call.uniqueCallId,
+            recordingHash: item.recordingHash,
+            fileName: item.recording.fileName,
             reason: message,
           })),
         );
@@ -260,48 +329,40 @@ class ApiServiceClass {
       onProgress?.({completed, total: items.length});
     }
 
-    result.attachedIds = Array.from(new Set(result.attachedIds));
-    result.alreadyAttachedIds = Array.from(new Set(result.alreadyAttachedIds));
-    result.notFoundIds = Array.from(new Set(result.notFoundIds));
+    result.uploadedHashes = Array.from(new Set(result.uploadedHashes));
+    result.repairedHashes = Array.from(new Set(result.repairedHashes));
+    result.duplicateHashes = Array.from(new Set(result.duplicateHashes));
 
     return result;
   }
 
   private async syncRecordingChunk(
-    items: RecordingUploadItem[],
-    range: DateRange,
+    items: PreparedRecordingUpload[],
   ): Promise<RecordingSyncSummary> {
     const formData = new FormData();
 
-    const payloadCalls = items.map(({call}) => ({
-      id: call.id,
-      remoteName: call.remoteName,
-      remoteNumber: call.remoteNumber,
-      callerName: call.callerName,
-      callerNumber: call.callerNumber,
-      receiverName: call.receiverName,
-      receiverNumber: call.receiverNumber,
-      callType: call.callType,
-      duration: call.duration,
-      timestamp: call.timestamp,
-      uniqueCallId: call.uniqueCallId,
-      audioField: `audio_${call.uniqueCallId}`,
-    }));
+    const payloadRecordings = items.map(({recording, recordingHash}) => {
+      const audioField = `audio_${recordingHash}`;
+
+      return {
+        clientId: recording.id,
+        recordingHash,
+        fileName: recording.fileName,
+        fileSize: recording.fileSize,
+        recordingTime: recording.recordingTime,
+        extension: recording.extension,
+        audioField,
+      };
+    });
 
     formData.append(
       'payload',
-      JSON.stringify({
-        startDateKey: range.startDateKey,
-        endDateKey: range.endDateKey,
-        startTimestamp: range.startTimestamp,
-        endTimestamp: range.endTimestamp,
-        calls: payloadCalls,
-      }),
+      JSON.stringify({recordings: payloadRecordings}),
     );
 
-    items.forEach(({call, recording}) => {
+    items.forEach(({recording, recordingHash}) => {
       formData.append(
-        `audio_${call.uniqueCallId}`,
+        `audio_${recordingHash}`,
         {
           uri: toFileUri(recording.filePath),
           name: recording.fileName,
@@ -311,12 +372,12 @@ class ApiServiceClass {
     });
 
     const response = await fetchWithTimeout(
-      `${API_BASE_URL}/api/calls/recordings/sync`,
+      `${API_BASE_URL}/api/recordings/sync`,
       {
         method: 'POST',
         headers: {
           'X-API-Key': API_KEY,
-          // Do not manually set multipart Content-Type/boundary.
+          // React Native adds the multipart boundary.
         },
         body: formData,
       },
@@ -338,6 +399,9 @@ class ApiServiceClass {
     };
   }
 
+  /**
+   * Existing CALL LOG visual status endpoint - unchanged.
+   */
   async checkSynced(uniqueCallIds: string[]): Promise<{
     syncedIds: string[];
     missingIds: string[];
@@ -357,7 +421,7 @@ class ApiServiceClass {
           method: 'GET',
           headers: {'X-API-Key': API_KEY},
         },
-        UPLOAD_TIMEOUT_MS,
+        REQUEST_TIMEOUT_MS,
       );
 
       const json = await response.json().catch(() => ({}));

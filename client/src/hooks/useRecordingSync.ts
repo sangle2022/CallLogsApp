@@ -1,23 +1,28 @@
 import {useCallback, useState} from 'react';
 import {Alert} from 'react-native';
-import {CallLogEntry, LocalIdentity} from '../types/CallLog.types';
-import {CallRecordingFile} from '../types/Recording.types';
+import {
+  CallRecordingFile,
+  PreparedRecordingUpload,
+} from '../types/Recording.types';
 import {DateRange, SyncProgress} from '../types/Sync.types';
 import {isTimestampInRange} from '../utils/dateRange';
-import {PermissionManager} from '../permissions/PermissionManager';
-import {CallLogService} from '../services/CallLogService';
-import {
-  ApiService,
-  RecordingUploadItem,
-} from '../services/ApiService';
-import {RecordingMatcher} from '../services/RecordingMatcher';
+import {ApiService} from '../services/ApiService';
+import {RecordingService} from '../services/RecordingService';
 
 interface Options {
   recordings: CallRecordingFile[];
-  identity: LocalIdentity | null;
 }
 
-export function useRecordingSync({recordings, identity}: Options) {
+/**
+ * Independent recording sync.
+ *
+ * IMPORTANT:
+ * - No call-log permission is requested here.
+ * - No Android call rows are loaded here.
+ * - No RecordingMatcher is used here.
+ * - Every recording is deduplicated by SHA-256 of the actual audio file bytes.
+ */
+export function useRecordingSync({recordings}: Options) {
   const [modalVisible, setModalVisible] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState<SyncProgress>({
@@ -25,22 +30,25 @@ export function useRecordingSync({recordings, identity}: Options) {
     total: 0,
   });
 
+  /**
+   * Visual-only state for the current app session.
+   * CRM remains the authoritative dedupe source.
+   */
+  const [syncedLocalIds, setSyncedLocalIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+
   const openModal = useCallback(() => {
-    if (!identity) {
+    if (recordings.length === 0) {
       Alert.alert(
-        'User details required',
-        'Please configure your name and phone number from Home first.',
+        'Nothing to sync',
+        'No call recording files were found on this device.',
       );
       return;
     }
 
-    if (recordings.length === 0) {
-      Alert.alert('Nothing to sync', 'No call recordings were found on this device.');
-      return;
-    }
-
     setModalVisible(true);
-  }, [identity, recordings.length]);
+  }, [recordings.length]);
 
   const closeModal = useCallback(() => {
     if (!uploading) {
@@ -50,108 +58,152 @@ export function useRecordingSync({recordings, identity}: Options) {
 
   const syncRange = useCallback(
     async (range: DateRange) => {
-      if (!identity) {
+      const selected = recordings.filter(recording => {
+        return (
+          recording.recordingTime > 0 &&
+          isTimestampInRange(recording.recordingTime, range)
+        );
+      });
+
+      if (selected.length === 0) {
         Alert.alert(
-          'User details required',
-          'Please configure your name and phone number from Home first.',
+          'Nothing to sync',
+          'No recording files exist in the selected date range.',
         );
         return;
       }
 
       setUploading(true);
-      setProgress({completed: 0, total: 0});
+      setProgress({completed: 0, total: selected.length});
 
       try {
-        // Recording -> CRM matching depends on the original Android call row.
-        const permissionResult =
-          await PermissionManager.requestCallLogPermissions();
+        /**
+         * Hash only the selected files. RNFS performs SHA-256 natively so we
+         * do not load entire audio files into JavaScript memory.
+         */
+        const prepared: PreparedRecordingUpload[] = [];
+        const hashErrors: string[] = [];
 
-        if (!permissionResult.granted) {
-          Alert.alert(
-            'Call log permission required',
-            'Call log access is required to safely match each recording to the correct CRM call record.',
-          );
-          return;
-        }
+        for (let index = 0; index < selected.length; index += 1) {
+          const recording = selected[index];
 
-        const callLogs: CallLogEntry[] =
-          await CallLogService.fetchCallLogs(identity);
+          try {
+            const recordingHash = await RecordingService.hashRecording(
+              recording,
+            );
 
-        const selectedCalls = callLogs.filter(call =>
-          isTimestampInRange(call.timestamp, range),
-        );
-
-        if (selectedCalls.length === 0) {
-          Alert.alert(
-            'Nothing to sync',
-            'No calls exist in the selected date range.',
-          );
-          return;
-        }
-
-        const usedRecordingPaths = new Set<string>();
-        const matched: RecordingUploadItem[] = [];
-
-        for (const call of selectedCalls) {
-          const recording = RecordingMatcher.findMatchForCall(
-            call,
-            recordings,
-            usedRecordingPaths,
-          );
-
-          if (!recording) {
-            continue;
+            prepared.push({recording, recordingHash});
+          } catch (error: any) {
+            hashErrors.push(
+              `${recording.fileName}: ${
+                error?.message || 'Could not calculate file hash.'
+              }`,
+            );
           }
 
-          usedRecordingPaths.add(recording.filePath);
-          matched.push({call, recording});
+          setProgress({
+            completed: index + 1,
+            total: selected.length,
+          });
         }
 
-        const unmatchedCalls = selectedCalls.length - matched.length;
-
-        if (matched.length === 0) {
+        if (prepared.length === 0) {
           Alert.alert(
-            'No safe matches found',
-            'No recording could be matched confidently to calls in this date range. Nothing was uploaded.',
+            'Recording sync failed',
+            hashErrors[0] || 'Unable to prepare the selected recording files.',
           );
           return;
         }
 
-        setProgress({completed: 0, total: matched.length});
+        /**
+         * Preflight CRM dedupe check prevents re-uploading audio that is
+         * already safely attached in the independent recording module.
+         */
+        const check = await ApiService.checkRecordings(
+          prepared.map(item => item.recordingHash),
+        );
+
+        const alreadySyncedHashes = new Set(check.syncedHashes);
+        const pendingHashes = new Set(check.pendingHashes);
+
+        const alreadySyncedItems = prepared.filter(item =>
+          alreadySyncedHashes.has(item.recordingHash),
+        );
+
+        if (alreadySyncedItems.length > 0) {
+          setSyncedLocalIds(current => {
+            const next = new Set(current);
+            alreadySyncedItems.forEach(item => next.add(item.recording.id));
+            return next;
+          });
+        }
+
+        const pending = prepared.filter(item =>
+          pendingHashes.has(item.recordingHash),
+        );
+
+        if (pending.length === 0) {
+          setModalVisible(false);
+
+          const lines = [
+            `${alreadySyncedItems.length} recording(s) already exist in CRM`,
+          ];
+
+          if (hashErrors.length > 0) {
+            lines.push(`${hashErrors.length} file(s) could not be prepared`);
+          }
+
+          Alert.alert('Nothing new to upload', lines.join('\n'));
+          return;
+        }
+
+        setProgress({completed: 0, total: pending.length});
 
         const summary = await ApiService.syncRecordings(
-          matched,
-          range,
+          pending,
           setProgress,
         );
 
+        const successfulHashes = new Set([
+          ...summary.uploadedHashes,
+          ...summary.repairedHashes,
+          ...summary.duplicateHashes,
+        ]);
+
+        setSyncedLocalIds(current => {
+          const next = new Set(current);
+
+          prepared.forEach(item => {
+            if (
+              alreadySyncedHashes.has(item.recordingHash) ||
+              successfulHashes.has(item.recordingHash)
+            ) {
+              next.add(item.recording.id);
+            }
+          });
+
+          return next;
+        });
+
         setModalVisible(false);
 
+        const totalAlreadyInCrm =
+          alreadySyncedItems.length + summary.skippedDuplicates;
+
         const lines = [
-          `${summary.attached} recording(s) attached`,
-          `${summary.alreadyAttached} already attached`,
-          `${summary.notFound} CRM call record(s) not found`,
-          `${summary.failed} failed`,
+          `${summary.uploaded} new recording(s) uploaded`,
+          `${summary.repaired} incomplete CRM recording(s) repaired`,
+          `${totalAlreadyInCrm} duplicate recording(s) skipped`,
+          `${summary.failed + hashErrors.length} failed`,
         ];
-
-        if (unmatchedCalls > 0) {
-          lines.push(
-            `${unmatchedCalls} call(s) had no safe local recording match`,
-          );
-        }
-
-        if (summary.notFound > 0) {
-          lines.push('', 'Sync the corresponding call logs first, then retry recordings.');
-        }
 
         if (summary.errors.length > 0) {
           lines.push('', ...summary.errors.slice(0, 2));
+        } else if (hashErrors.length > 0) {
+          lines.push('', ...hashErrors.slice(0, 2));
         }
 
-        const hasProblems =
-          summary.failed > 0 ||
-          summary.notFound > 0 ||
-          unmatchedCalls > 0;
+        const hasProblems = summary.failed > 0 || hashErrors.length > 0;
 
         Alert.alert(
           hasProblems ? 'Recording sync finished' : 'Upload complete',
@@ -166,13 +218,14 @@ export function useRecordingSync({recordings, identity}: Options) {
         setUploading(false);
       }
     },
-    [identity, recordings],
+    [recordings],
   );
 
   return {
     modalVisible,
     uploading,
     progress,
+    syncedLocalIds,
     openModal,
     closeModal,
     syncRange,
