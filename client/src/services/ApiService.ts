@@ -298,6 +298,7 @@ class ApiServiceClass {
    */
   async syncRecordings(
     items: PreparedRecordingUpload[],
+    range: DateRange,
     onProgress?: (progress: SyncProgress) => void,
   ): Promise<RecordingSyncSummary> {
     const result = emptyRecordingSummary();
@@ -305,7 +306,7 @@ class ApiServiceClass {
 
     for (const chunk of chunkArray(items, RECORDING_SYNC_CHUNK_SIZE)) {
       try {
-        const chunkResult = await this.syncRecordingChunk(chunk);
+        const chunkResult = await this.syncRecordingChunk(chunk, range);
         mergeRecordingSummary(result, chunkResult);
       } catch (error: any) {
         const message =
@@ -338,6 +339,7 @@ class ApiServiceClass {
 
   private async syncRecordingChunk(
     items: PreparedRecordingUpload[],
+    range: DateRange,
   ): Promise<RecordingSyncSummary> {
     const formData = new FormData();
 
@@ -357,7 +359,13 @@ class ApiServiceClass {
 
     formData.append(
       'payload',
-      JSON.stringify({recordings: payloadRecordings}),
+      JSON.stringify({
+        startDateKey: range.startDateKey,
+        endDateKey: range.endDateKey,
+        startTimestamp: range.startTimestamp,
+        endTimestamp: range.endTimestamp,
+        recordings: payloadRecordings,
+      }),
     );
 
     items.forEach(({recording, recordingHash}) => {

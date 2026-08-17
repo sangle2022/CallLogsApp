@@ -1,7 +1,7 @@
 /**
  * CallRecordingsScreen.tsx
  *
- * Recordings are now a completely independent CRM data flow:
+ * Recordings are an independent CRM data flow:
  *
  * local audio file
  *   -> file metadata + SHA-256 content hash
@@ -10,7 +10,7 @@
  *
  * There is intentionally NO recording-to-call-log matching on this screen.
  */
-import React, {useCallback} from 'react';
+import React, {useCallback, useEffect, useState} from 'react';
 import {
   FlatList,
   RefreshControl,
@@ -29,11 +29,12 @@ import RecordingItem from '../components/RecordingItem';
 import LoadingIndicator from '../components/LoadingIndicator';
 import EmptyState from '../components/EmptyState';
 import UploadFab from '../components/UploadFab';
-import SyncDateRangeModal from '../components/SyncDateRangeModal';
+import RecordingDateRangeModal from '../components/RecordingDateRangeModal';
 
 import {COLORS} from '../utils/constants';
 import {CallRecordingFile} from '../types/Recording.types';
 import {PermissionManager} from '../permissions/PermissionManager';
+import {RecordingSyncStatusService} from '../services/RecordingSyncStatusService';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'CallRecordings'>;
 
@@ -59,7 +60,31 @@ export default function CallRecordingsScreen({navigation}: Props) {
     refresh,
   } = useCallRecordings(Boolean(identity));
 
-  const sync = useRecordingSync({recordings});
+  /**
+   * Same idea as the Call Logs screen:
+   * keep the visual SYNCED marker in AsyncStorage so navigating away and back
+   * does not reset every recording to unsynced.
+   */
+  const [acknowledgedRecordingIds, setAcknowledgedRecordingIds] = useState<
+    Set<string>
+  >(new Set());
+
+  const refreshVisualStatuses = useCallback(async () => {
+    const status = await RecordingSyncStatusService.getAcknowledgedSet(
+      recordings.map(item => item.id),
+    );
+
+    setAcknowledgedRecordingIds(status);
+  }, [recordings]);
+
+  useEffect(() => {
+    void refreshVisualStatuses();
+  }, [refreshVisualStatuses]);
+
+  const sync = useRecordingSync({
+    recordings,
+    onStatusChanged: refreshVisualStatuses,
+  });
 
   if (loadingIdentity) {
     return <LoadingIndicator message="Loading user details..." />;
@@ -132,7 +157,7 @@ export default function CallRecordingsScreen({navigation}: Props) {
         renderItem={({item}) => (
           <RecordingItem
             recording={item}
-            synced={sync.syncedLocalIds.has(item.id)}
+            synced={acknowledgedRecordingIds.has(item.id)}
           />
         )}
         contentContainerStyle={styles.listContent}
@@ -153,16 +178,12 @@ export default function CallRecordingsScreen({navigation}: Props) {
         accessibilityLabel="Upload recordings to CRM"
       />
 
-      <SyncDateRangeModal
+      <RecordingDateRangeModal
         visible={sync.modalVisible}
         uploading={sync.uploading}
         progress={sync.progress}
         onClose={sync.closeModal}
         onConfirm={sync.syncRange}
-        title="Upload recordings to CRM"
-        subtitle="Select a recording date range. Files are uploaded independently using their file name, size, file time and audio content. They are not matched with call logs."
-        confirmLabel="Upload recordings"
-        progressLabel="recordings"
       />
     </View>
   );

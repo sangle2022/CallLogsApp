@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const path = require('path');
 const env = require('../config/env');
 const logger = require('../utils/logger');
+const {validateSyncRange, isInRange} = require('../utils/dateRange');
 const {mapRecordingToCrmRecord} = require('../mapping/recording.mapping');
 const crm = require('./zohoRecordingCrm.service');
 
@@ -15,7 +16,7 @@ function normalizeHash(value) {
   return String(value || '').trim().toLowerCase();
 }
 
-function normalizeRecording(raw) {
+function normalizeRecording(raw, range) {
   if (!raw || typeof raw !== 'object') {
     throw badRequest('Recording item must be an object');
   }
@@ -44,8 +45,12 @@ function normalizeRecording(raw) {
   }
 
   const recordingTime = Number(raw.recordingTime || 0);
-  if (!Number.isFinite(recordingTime) || recordingTime < 0) {
+  if (!Number.isFinite(recordingTime) || recordingTime <= 0) {
     throw badRequest('Invalid recordingTime');
+  }
+
+  if (!isInRange(recordingTime, range)) {
+    throw badRequest('Recording time is outside the selected recording date');
   }
 
   const extension = String(raw.extension || '')
@@ -79,7 +84,15 @@ function validatePayload(payload) {
     );
   }
 
-  return payload.recordings;
+  const range = validateSyncRange(
+    payload.startTimestamp,
+    payload.endTimestamp,
+    payload.startDateKey,
+    payload.endDateKey,
+    env.maxRecordingSyncRangeDays,
+  );
+
+  return {recordings: payload.recordings, range};
 }
 
 function emptySummary(totalReceived) {
@@ -142,7 +155,7 @@ async function resolveRace(recordingHash) {
  *   - RecordingMatcher
  */
 async function syncRecordings(payload, files = []) {
-  const rawRecordings = validatePayload(payload);
+  const {recordings: rawRecordings, range} = validatePayload(payload);
   const summary = emptySummary(rawRecordings.length);
 
   const filesByField = new Map(
@@ -154,7 +167,7 @@ async function syncRecordings(payload, files = []) {
 
   for (const raw of rawRecordings) {
     try {
-      const recording = normalizeRecording(raw);
+      const recording = normalizeRecording(raw, range);
 
       if (seenHashes.has(recording.recordingHash)) {
         summary.skippedDuplicates += 1;

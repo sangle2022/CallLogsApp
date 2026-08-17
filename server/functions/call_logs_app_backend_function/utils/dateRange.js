@@ -19,7 +19,13 @@ function calendarDaySpan(startDateKey, endDateKey) {
   return Math.floor((endUtc - startUtc) / DAY_MS) + 1;
 }
 
-function validateSyncRange(startTimestamp, endTimestamp, startDateKey, endDateKey) {
+function validateSyncRange(
+  startTimestamp,
+  endTimestamp,
+  startDateKey,
+  endDateKey,
+  maxDays = env.maxSyncRangeDays,
+) {
   const start = Number(startTimestamp);
   const end = Number(endTimestamp);
 
@@ -34,16 +40,16 @@ function validateSyncRange(startTimestamp, endTimestamp, startDateKey, endDateKe
   if (span === null) {
     throw Object.assign(new Error('startDateKey and endDateKey must use YYYY-MM-DD'), { statusCode: 400 });
   }
-  if (span < 1 || span > env.maxSyncRangeDays) {
+  if (span < 1 || span > maxDays) {
     throw Object.assign(
-      new Error(`Date range cannot exceed ${env.maxSyncRangeDays} calendar days`),
+      new Error(`Date range cannot exceed ${maxDays} calendar day(s)`),
       { statusCode: 400 },
     );
   }
 
   // Sanity check against forged/mistyped timestamp bounds while leaving room
   // for DST transitions and timezone-offset differences.
-  if (end - start > env.maxSyncRangeDays * DAY_MS + 3 * 60 * 60 * 1000) {
+  if (end - start > maxDays * DAY_MS + 3 * 60 * 60 * 1000) {
     throw Object.assign(new Error('Timestamp range is inconsistent with the selected dates'), { statusCode: 400 });
   }
 

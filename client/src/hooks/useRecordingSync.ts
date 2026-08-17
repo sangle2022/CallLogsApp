@@ -8,9 +8,11 @@ import {DateRange, SyncProgress} from '../types/Sync.types';
 import {isTimestampInRange} from '../utils/dateRange';
 import {ApiService} from '../services/ApiService';
 import {RecordingService} from '../services/RecordingService';
+import {RecordingSyncStatusService} from '../services/RecordingSyncStatusService';
 
 interface Options {
   recordings: CallRecordingFile[];
+  onStatusChanged?: () => Promise<void> | void;
 }
 
 /**
@@ -21,22 +23,18 @@ interface Options {
  * - No Android call rows are loaded here.
  * - No RecordingMatcher is used here.
  * - Every recording is deduplicated by SHA-256 of the actual audio file bytes.
+ * - Local AsyncStorage status is visual-only. CRM remains the dedupe source.
  */
-export function useRecordingSync({recordings}: Options) {
+export function useRecordingSync({
+  recordings,
+  onStatusChanged,
+}: Options) {
   const [modalVisible, setModalVisible] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState<SyncProgress>({
     completed: 0,
     total: 0,
   });
-
-  /**
-   * Visual-only state for the current app session.
-   * CRM remains the authoritative dedupe source.
-   */
-  const [syncedLocalIds, setSyncedLocalIds] = useState<Set<string>>(
-    () => new Set(),
-  );
 
   const openModal = useCallback(() => {
     if (recordings.length === 0) {
@@ -78,8 +76,8 @@ export function useRecordingSync({recordings}: Options) {
 
       try {
         /**
-         * Hash only the selected files. RNFS performs SHA-256 natively so we
-         * do not load entire audio files into JavaScript memory.
+         * Hash only selected files. RNFS calculates SHA-256 natively, so the
+         * complete audio file is not loaded into JavaScript memory.
          */
         const prepared: PreparedRecordingUpload[] = [];
         const hashErrors: string[] = [];
@@ -116,8 +114,7 @@ export function useRecordingSync({recordings}: Options) {
         }
 
         /**
-         * Preflight CRM dedupe check prevents re-uploading audio that is
-         * already safely attached in the independent recording module.
+         * CRM preflight check remains the source of truth for duplicates.
          */
         const check = await ApiService.checkRecordings(
           prepared.map(item => item.recordingHash),
@@ -130,12 +127,15 @@ export function useRecordingSync({recordings}: Options) {
           alreadySyncedHashes.has(item.recordingHash),
         );
 
+        /**
+         * Persist the visual SYNCED state so it survives navigation and app
+         * restarts. This does not affect upload/dedupe decisions.
+         */
         if (alreadySyncedItems.length > 0) {
-          setSyncedLocalIds(current => {
-            const next = new Set(current);
-            alreadySyncedItems.forEach(item => next.add(item.recording.id));
-            return next;
-          });
+          await RecordingSyncStatusService.markAcknowledged(
+            alreadySyncedItems.map(item => item.recording.id),
+          );
+          await onStatusChanged?.();
         }
 
         const pending = prepared.filter(item =>
@@ -161,6 +161,7 @@ export function useRecordingSync({recordings}: Options) {
 
         const summary = await ApiService.syncRecordings(
           pending,
+          range,
           setProgress,
         );
 
@@ -170,20 +171,18 @@ export function useRecordingSync({recordings}: Options) {
           ...summary.duplicateHashes,
         ]);
 
-        setSyncedLocalIds(current => {
-          const next = new Set(current);
+        const newlyAcknowledgedIds = prepared
+          .filter(item =>
+            successfulHashes.has(item.recordingHash),
+          )
+          .map(item => item.recording.id);
 
-          prepared.forEach(item => {
-            if (
-              alreadySyncedHashes.has(item.recordingHash) ||
-              successfulHashes.has(item.recordingHash)
-            ) {
-              next.add(item.recording.id);
-            }
-          });
-
-          return next;
-        });
+        if (newlyAcknowledgedIds.length > 0) {
+          await RecordingSyncStatusService.markAcknowledged(
+            newlyAcknowledgedIds,
+          );
+          await onStatusChanged?.();
+        }
 
         setModalVisible(false);
 
@@ -218,14 +217,13 @@ export function useRecordingSync({recordings}: Options) {
         setUploading(false);
       }
     },
-    [recordings],
+    [recordings, onStatusChanged],
   );
 
   return {
     modalVisible,
     uploading,
     progress,
-    syncedLocalIds,
     openModal,
     closeModal,
     syncRange,

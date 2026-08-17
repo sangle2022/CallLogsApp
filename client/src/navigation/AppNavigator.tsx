@@ -1,25 +1,22 @@
 /**
  * AppNavigator.tsx
  * Central navigation configuration using React Navigation's native stack.
- * Defining `RootStackParamList` here gives every screen full TypeScript
- * type-safety for navigation props and route params.
- *
- * Install:
- *   npm install @react-navigation/native @react-navigation/native-stack
- *   npm install react-native-screens react-native-safe-area-context
  */
 import React from 'react';
-import { NavigationContainer } from '@react-navigation/native';
-import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import {Pressable, StyleSheet, Text} from 'react-native';
+import {NavigationContainer} from '@react-navigation/native';
+import {createNativeStackNavigator} from '@react-navigation/native-stack';
 import HomeScreen from '../screens/HomeScreen';
 import CallLogsScreen from '../screens/CallLogsScreen';
 import CallRecordingsScreen from '../screens/CallRecordingsScreen';
-import { COLORS } from '../utils/constants';
+import {COLORS} from '../utils/constants';
+import RecordingSettingsScreen from '../screens/RecordingSettingsScreen';
 
 export type RootStackParamList = {
   Home: undefined;
   CallLogs: undefined;
   CallRecordings: undefined;
+  RecordingSettings: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -30,27 +27,53 @@ export default function AppNavigator() {
       <Stack.Navigator
         initialRouteName="Home"
         screenOptions={{
-          headerStyle: { backgroundColor: COLORS.primary },
+          headerStyle: {backgroundColor: COLORS.primary},
           headerTintColor: '#fff',
-          headerTitleStyle: { fontWeight: '700' },
-        }}
-      >
+          headerTitleStyle: {fontWeight: '700'},
+        }}>
         <Stack.Screen
           name="Home"
           component={HomeScreen}
-          options={{ title: 'Call Manager' }}
+          options={{title: 'Call Manager'}}
         />
+
         <Stack.Screen
           name="CallLogs"
           component={CallLogsScreen}
-          options={{ title: 'Call Logs' }}
+          options={{title: 'Call Logs'}}
         />
+
         <Stack.Screen
           name="CallRecordings"
           component={CallRecordingsScreen}
-          options={{ title: 'Call Recordings' }}
+          options={({navigation}) => ({
+            title: 'Call Recordings',
+            headerRight: () => (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Recording folder settings"
+                hitSlop={10}
+                onPress={() => navigation.navigate('RecordingSettings')}>
+                <Text style={styles.headerAction}>Folder</Text>
+              </Pressable>
+            ),
+          })}
+        />
+
+        <Stack.Screen
+          name="RecordingSettings"
+          component={RecordingSettingsScreen}
+          options={{title: 'Recording Folder'}}
         />
       </Stack.Navigator>
     </NavigationContainer>
   );
 }
+
+const styles = StyleSheet.create({
+  headerAction: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+});
