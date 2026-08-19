@@ -1,10 +1,10 @@
 import React from 'react';
 import {
-  ActivityIndicator,
+  // ActivityIndicator,
   Image,
   StatusBar,
   StyleSheet,
-  Text,
+  // Text,
   View,
 } from 'react-native';
 
