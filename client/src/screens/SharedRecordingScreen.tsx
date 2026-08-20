@@ -77,7 +77,6 @@ function toLocalDateKey(timestamp: number): string {
 
 export default function SharedRecordingScreen({ navigation, route }: Props) {
   const [uploading, setUploading] = useState(false);
-    console.log('routeeeeeeeeeee',route)
 
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
 

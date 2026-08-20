@@ -1,6 +1,13 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  useTransition,
+} from 'react';
 
 import {
+  ActivityIndicator,
   FlatList,
   RefreshControl,
   StyleSheet,
@@ -94,8 +101,24 @@ export default function CallLogsScreen({ navigation }: Props) {
 
   const [activeFilter, setActiveFilter] = useState<CallLogFilter>('ALL');
 
+
+  const [isFilterPending, startFilterTransition] = useTransition();
+
   const [acknowledgedIds, setAcknowledgedIds] = useState<Set<string>>(
     new Set(),
+  );
+
+  const handleFilterChange = useCallback(
+    (newFilter: CallLogFilter) => {
+      if (newFilter === activeFilter) {
+        return;
+      }
+
+      startFilterTransition(() => {
+        setActiveFilter(newFilter);
+      });
+    },
+    [activeFilter],
   );
 
   const refreshVisualStatuses = useCallback(async () => {
@@ -197,8 +220,13 @@ export default function CallLogsScreen({ navigation }: Props) {
             return (
               <TouchableOpacity
                 key={option.value}
-                style={[styles.filterChip, active && styles.filterChipActive]}
-                onPress={() => setActiveFilter(option.value)}
+                style={[
+                  styles.filterChip,
+
+                  active && styles.filterChipActive,
+                ]}
+                onPress={() => handleFilterChange(option.value)}
+                activeOpacity={0.75}
               >
                 <Text
                   style={[
@@ -214,39 +242,51 @@ export default function CallLogsScreen({ navigation }: Props) {
           })}
         </View>
 
-        <FlatList
-          data={filteredLogs}
-          keyExtractor={item => item.uniqueCallId}
-          renderItem={({ item }) => (
-            <CallLogItem
-              entry={item}
-              acknowledged={acknowledgedIds.has(item.uniqueCallId)}
+        {isFilterPending ? (
+          <View style={styles.filterLoader}>
+            <ActivityIndicator
+              size="large"
+              color={COLORS.primary}
             />
-          )}
-          ListEmptyComponent={
-            <EmptyState
-              title="No matching calls"
-              description="No call logs match this type filter."
-              actionLabel="Show All"
-              onAction={() => setActiveFilter('ALL')}
-            />
-          }
-          contentContainerStyle={styles.listContent}
-          refreshControl={
-            <RefreshControl
-              refreshing={false}
-              onRefresh={refresh}
-              colors={[COLORS.primary]}
-            />
-          }
-          initialNumToRender={20}
-          windowSize={10}
-        />
+
+            <Text style={styles.filterLoaderText}>
+              Filtering calls...
+            </Text>
+          </View>
+        ) : (
+          <FlatList
+            data={filteredLogs}
+            keyExtractor={item => item.uniqueCallId}
+            renderItem={({ item }) => (
+              <CallLogItem
+                entry={item}
+                acknowledged={acknowledgedIds.has(item.uniqueCallId)}
+              />
+            )}
+            ListEmptyComponent={
+              <EmptyState
+                title="No matching calls"
+                description="No call logs match this type filter."
+                actionLabel="Show All"
+                onAction={() => handleFilterChange('ALL')}
+              />
+            }
+            contentContainerStyle={styles.listContent}
+            refreshControl={
+              <RefreshControl
+                refreshing={false}
+                onRefresh={refresh}
+                colors={[COLORS.primary]}
+              />
+            }
+            initialNumToRender={20}
+            windowSize={10}
+          />
+        )}
 
         <UploadFab
           onPress={sync.openModal}
           disabled={sync.uploading}
-
           accessibilityLabel="Upload call logs to CRM"
         />
 
@@ -330,5 +370,24 @@ const styles = StyleSheet.create({
 
   filterChipTextActive: {
     color: '#FFFFFF',
+  },
+  filterLoader: {
+    flex: 1,
+
+    alignItems: 'center',
+
+    justifyContent: 'center',
+
+    paddingBottom: 80,
+  },
+
+  filterLoaderText: {
+    marginTop: 12,
+
+    fontSize: 14,
+
+    fontWeight: '600',
+
+    color: COLORS.textSecondary,
   },
 });
